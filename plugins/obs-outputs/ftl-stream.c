@@ -96,6 +96,7 @@ struct ftl_stream {
 void log_libftl_messages(ftl_log_severity_t log_level, const char * message);
 static bool init_connect(struct ftl_stream *stream);
 static void *connect_thread(void *data);
+bool get_stream_key_and_channel_id(const char *key, uint32_t *chan_id, char *stream_key);
 
 static const char *ftl_stream_getname(void *unused)
 {
@@ -968,7 +969,7 @@ static bool init_connect(struct ftl_stream *stream)
 	obs_service_t *service;
 	obs_data_t *settings;
 	const char *bind_ip, *key;
-	char stream_key[25];
+	char stream_key[50];
 
 	info("init_connect\n");
 
@@ -990,9 +991,21 @@ static bool init_connect(struct ftl_stream *stream)
 	settings = obs_output_get_settings(stream->output);
 	dstr_copy(&stream->path,     obs_service_get_url(service));
 	key = obs_service_get_key(service);
-	sscanf(key, "%d-%s", &stream->channel_id, stream_key);
 
-	info("key: %s, Stream key %s, channel id %d\n", key, stream->channel_id, stream_key);
+	info("Key is %s\n", key);
+
+	info("hi\n");
+
+	if(!get_stream_key_and_channel_id(key, &(stream->channel_id), stream_key)){
+		info("Unable to parse stream key\n");
+		return false;
+	}
+
+	info("hi\n");
+
+	info("key: %s, Stream key %s, channel id %d\n", key, stream_key, stream->channel_id);
+
+	info("hi\n");
 
 	//dstr_copy(&stream->key,      obs_service_get_key(service));
 	dstr_copy(&stream->key,      stream_key);
@@ -1051,6 +1064,29 @@ int map_ftl_error_to_obs_error(int status) {
 	}
 #endif
 	return ftl_to_obs_error_code;
+}
+
+bool get_stream_key_and_channel_id(const char *key, uint32_t *chan_id, char *stream_key) {
+	int len;
+	
+	len = strlen(key);
+	for (int i = 0; i != len; i++) {
+		/* find the comma that divides the stream key */
+		if (key[i] == '-' || key[i] == ',') {
+			/* stream key gets copied */
+			strcpy(stream_key, key+i+1);
+
+			/* Now get the channel id */
+			char * copy_of_key = strdup(key);
+			copy_of_key[i] = '\0';
+			*chan_id = atol(copy_of_key);
+			free(copy_of_key);
+
+			return true;
+		}
+	}
+
+		return false;
 }
 
 struct obs_output_info ftl_output_info = {
