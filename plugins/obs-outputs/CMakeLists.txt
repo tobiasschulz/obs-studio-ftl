@@ -69,6 +69,7 @@ set(obs-outputs_HEADERS
 set(obs-outputs_SOURCES
 	obs-outputs.c
 	rtmp-stream.c
+	ftl-stream.c
 	flv-output.c
 	flv-mux.c
 	net-if.c)

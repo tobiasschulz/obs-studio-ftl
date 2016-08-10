@@ -269,7 +269,7 @@ void SimpleOutput::LoadRecordingPreset()
 
 SimpleOutput::SimpleOutput(OBSBasic *main_) : BasicOutputHandler(main_)
 {
-	streamOutput = obs_output_create("rtmp_output", "simple_stream",
+	streamOutput = obs_output_create("ftl_output", "simple_stream",
 			nullptr, nullptr);
 	if (!streamOutput)
 		throw "Failed to create stream output (simple output)";
