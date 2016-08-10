@@ -33,6 +33,36 @@ if(MSVC)
 		w32-pthreads)
 endif()
 
+set(obs-outputs_libftl_HEADERS
+	libftl/ftl.h
+	libftl/hmac/hmac.h
+	libftl/hmac/sha2.h)
+
+if(WIN32)
+	set(obs-outputs_libftl_SOURCES
+		libftl/activate.c
+		libftl/components.c
+		libftl/deactivate.c
+		libftl/init.c
+		libftl/stream_configuration.c
+		libftl/logging.c
+		libftl/posix/socket.c
+		libftl/hmac/hmac.c
+		libftl/hmac/sha2.c
+		libftl/charon_protocol.c)	
+else()
+	set(obs-outputs_libftl_SOURCES
+		libftl/activate.c
+		libftl/components.c
+		libftl/deactivate.c
+		libftl/init.c
+		libftl/stream_configuration.c
+		libftl/logging.c
+		libftl/hmac/hmac.c
+		libftl/hmac/sha2.c
+		libftl/charon_protocol.c)	
+endif()
+
 set(obs-outputs_librtmp_HEADERS
 	librtmp/amf.h
 	librtmp/bytes.h
@@ -57,6 +87,8 @@ set(obs-outputs_librtmp_SOURCES
 if(NOT WIN32)
 	set_source_files_properties(${obs-outputs_librtmp_SOURCES} PROPERTIES
 		COMPILE_FLAGS "-fvisibility=hidden")
+	set_source_files_properties(${obs-outputs_libftl_SOURCES} PROPERTIES
+		COMPILE_FLAGS "-fvisibility=hidden")		
 endif()
 
 set(obs-outputs_HEADERS
@@ -65,7 +97,8 @@ set(obs-outputs_HEADERS
 	net-if.h
 	flv-mux.h
 	flv-output.h
-	librtmp)
+	librtmp
+	libftl)
 set(obs-outputs_SOURCES
 	obs-outputs.c
 	rtmp-stream.c
@@ -77,6 +110,8 @@ set(obs-outputs_SOURCES
 add_library(obs-outputs MODULE
 	${obs-outputs_SOURCES}
 	${obs-outputs_HEADER}
+	${obs-outputs_libftl_SOURCES}
+	${obs-outputs_libftl_HEADERS}
 	${obs-outputs_librtmp_SOURCES}
 	${obs-outputs_librtmp_HEADERS})
 target_link_libraries(obs-outputs

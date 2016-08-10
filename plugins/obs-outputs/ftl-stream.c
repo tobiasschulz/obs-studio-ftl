@@ -24,6 +24,7 @@
 #include <inttypes.h>
 //#include "librtmp/rtmp.h"
 //#include "librtmp/log.h"
+#include "libftl/ftl.h"
 #include "flv-mux.h"
 #include "net-if.h"
 
@@ -68,6 +69,7 @@ struct ftl_stream {
 	uint64_t         stop_ts;
 
 	struct dstr      path, key;
+	uint32_t         channel_id;
 	struct dstr      username, password;
 	struct dstr      encoder_name;
 	struct dstr      bind_ip;
@@ -83,7 +85,17 @@ struct ftl_stream {
 	int              dropped_frames;
 
 //	RTMP             rtmp;
+  SOCKET           sb_socket;
+  uint32_t         audio_ssrc, video_ssrc, scale_width, scale_height;
+	ftl_stream_configuration_t* stream_config;
+	ftl_stream_video_component_t* video_component;
+	ftl_stream_audio_component_t* audio_component;
 };
+
+
+void log_libftl_messages(ftl_log_severity_t log_level, const char * message);
+static bool init_connect(struct ftl_stream *stream);
+static void *connect_thread(void *data);
 
 static const char *ftl_stream_getname(void *unused)
 {
@@ -98,7 +110,7 @@ static void log_ftl(int level, const char *format, va_list args)
 
 	blogva(LOG_INFO, format, args);
 }
-/*
+
 static inline size_t num_buffered_packets(struct ftl_stream *stream);
 
 static inline void free_packets(struct ftl_stream *stream)
@@ -138,13 +150,13 @@ static inline bool disconnected(struct ftl_stream *stream)
 {
 	return os_atomic_load_bool(&stream->disconnected);
 }
-*/
+
 static void ftl_stream_destroy(void *data)
 {
 	struct ftl_stream *stream = data;
 
 	info("ftl_stream_destroy\n");
-/*
+
 	if (stopping(stream) && !connecting(stream)) {
 		pthread_join(stream->send_thread, NULL);
 
@@ -176,20 +188,29 @@ static void ftl_stream_destroy(void *data)
 		circlebuf_free(&stream->packets);
 		bfree(stream);
 	}
-	*/
 }
 
 static void *ftl_stream_create(obs_data_t *settings, obs_output_t *output)
 {
+	ftl_status_t status_code;	
 	struct ftl_stream *stream = bzalloc(sizeof(struct ftl_stream));
 	info("ftl_stream_create\n");
-	/*
+	
 	stream->output = output;
 	pthread_mutex_init_value(&stream->packets_mutex);
-
+/*
 	RTMP_Init(&stream->rtmp);
 	RTMP_LogSetCallback(log_rtmp);
 	RTMP_LogSetLevel(RTMP_LOGWARNING);
+*/
+	ftl_init();
+	ftl_register_log_handler(log_libftl_messages);
+
+	status_code = ftl_create_stream_configuration(&(stream->stream_config));
+	if (status_code != FTL_SUCCESS) {
+		blog(LOG_WARNING, "Failed to initialize stream configuration: errno %d\n", status_code);
+		goto fail;
+	}
 
 	if (pthread_mutex_init(&stream->packets_mutex, NULL) != 0)
 		goto fail;
@@ -201,15 +222,15 @@ static void *ftl_stream_create(obs_data_t *settings, obs_output_t *output)
 
 fail:
 	ftl_stream_destroy(stream);
-	*/
+
 	return NULL;
 }
 
 static void ftl_stream_stop(void *data, uint64_t ts)
 {
 	struct ftl_stream *stream = data;
+	info("ftl_stream_stop\n");
 
-/*
 	if (stopping(stream))
 		return;
 
@@ -223,8 +244,6 @@ static void ftl_stream_stop(void *data, uint64_t ts)
 		if (stream->stop_ts == 0)
 			os_sem_post(stream->send_sem);
 	}
-	*/
-	info("ftl_stream_stop\n");
 }
 
 /*
@@ -241,7 +260,7 @@ static inline void set_rtmp_dstr(AVal *val, struct dstr *str)
 	val->av_val = valid ? str->array    : NULL;
 	val->av_len = valid ? (int)str->len : 0;
 }
-
+*/
 static inline bool get_next_packet(struct ftl_stream *stream,
 		struct encoder_packet *packet)
 {
@@ -261,7 +280,7 @@ static inline bool get_next_packet(struct ftl_stream *stream,
 
 static bool discard_recv_data(struct ftl_stream *stream, size_t size)
 {
-	RTMP *rtmp = &stream->rtmp;
+//	RTMP *rtmp = &stream->rtmp;
 	uint8_t buf[512];
 #ifdef _WIN32
 	int ret;
@@ -274,9 +293,9 @@ static bool discard_recv_data(struct ftl_stream *stream, size_t size)
 		size -= bytes;
 
 #ifdef _WIN32
-		ret = recv(rtmp->m_sb.sb_socket, buf, (int)bytes, 0);
+		ret = recv(stream->sb_socket, buf, (int)bytes, 0);
 #else
-		ret = recv(rtmp->m_sb.sb_socket, buf, bytes, 0);
+		ret = recv(stream->sb_socket, buf, bytes, 0);
 #endif
 
 		if (ret <= 0) {
@@ -295,9 +314,9 @@ static bool discard_recv_data(struct ftl_stream *stream, size_t size)
 
 	return true;
 }
-*/
 
-/*
+
+
 static int send_packet(struct ftl_stream *stream,
 		struct encoder_packet *packet, bool is_header, size_t idx)
 {
@@ -307,10 +326,10 @@ static int send_packet(struct ftl_stream *stream,
 	int     ret = 0;
 
 #ifdef _WIN32
-	ret = ioctlsocket(stream->rtmp.m_sb.sb_socket, FIONREAD,
+	ret = ioctlsocket(stream->sb_socket, FIONREAD,
 			(u_long*)&recv_size);
 #else
-	ret = ioctl(stream->rtmp.m_sb.sb_socket, FIONREAD, &recv_size);
+	ret = ioctl(stream->sb_socket, FIONREAD, &recv_size);
 #endif
 
 	if (ret >= 0 && recv_size > 0) {
@@ -322,7 +341,7 @@ static int send_packet(struct ftl_stream *stream,
 #ifdef TEST_FRAMEDROPS
 	os_sleep_ms(rand() % 40);
 #endif
-	ret = RTMP_Write(&stream->rtmp, (char*)data, (int)size, (int)idx);
+	//ret = RTMP_Write(&stream->rtmp, (char*)data, (int)size, (int)idx);
 	bfree(data);
 
 	obs_free_encoder_packet(packet);
@@ -330,15 +349,14 @@ static int send_packet(struct ftl_stream *stream,
 	stream->total_bytes_sent += size;
 	return ret;
 }
-*/
 
 //static inline bool send_headers(struct ftl_stream *stream);
-/*
+
 static void *send_thread(void *data)
 {
 	struct ftl_stream *stream = data;
 
-	os_set_thread_name("rtmp-stream: send_thread");
+	os_set_thread_name("ftl-stream: send_thread");
 
 	while (os_sem_wait(stream->send_sem) == 0) {
 		struct encoder_packet packet;
@@ -357,12 +375,14 @@ static void *send_thread(void *data)
 			}
 		}
 
+/*
 		if (!stream->sent_headers) {
 			if (!send_headers(stream)) {
 				os_atomic_set_bool(&stream->disconnected, true);
 				break;
 			}
 		}
+*/
 
 		if (send_packet(stream, &packet, false, packet.track_idx) < 0) {
 			os_atomic_set_bool(&stream->disconnected, true);
@@ -376,7 +396,7 @@ static void *send_thread(void *data)
 		info("User stopped the stream");
 	}
 
-	RTMP_Close(&stream->rtmp);
+	//RTMP_Close(&stream->rtmp);
 
 	if (!stopping(stream)) {
 		pthread_detach(stream->send_thread);
@@ -391,7 +411,7 @@ static void *send_thread(void *data)
 	stream->sent_headers = false;
 	return NULL;
 }
-
+/*
 static bool send_meta_data(struct ftl_stream *stream, size_t idx, bool *next)
 {
 	uint8_t *meta_data;
@@ -468,7 +488,7 @@ static inline bool send_headers(struct ftl_stream *stream)
 
 	return true;
 }
-
+*/
 static inline bool reset_semaphore(struct ftl_stream *stream)
 {
 	os_sem_destroy(stream->send_sem);
@@ -483,17 +503,19 @@ static inline bool reset_semaphore(struct ftl_stream *stream)
 
 static void adjust_sndbuf_size(struct ftl_stream *stream, int new_size)
 {
+	/*
 	int cur_sendbuf_size = new_size;
 	socklen_t int_size = sizeof(int);
 
-	getsockopt(stream->rtmp.m_sb.sb_socket, SOL_SOCKET, SO_SNDBUF,
+	getsockopt(stream->sb_socket, SOL_SOCKET, SO_SNDBUF,
 			(char*)&cur_sendbuf_size, &int_size);
 
 	if (cur_sendbuf_size < new_size) {
 		cur_sendbuf_size = new_size;
-		setsockopt(stream->rtmp.m_sb.sb_socket, SOL_SOCKET, SO_SNDBUF,
+		setsockopt(stream->sb_socket, SOL_SOCKET, SO_SNDBUF,
 				(const char*)&cur_sendbuf_size, int_size);
 	}
+	*/
 }
 
 static int init_send(struct ftl_stream *stream)
@@ -510,12 +532,13 @@ static int init_send(struct ftl_stream *stream)
 
 	ret = pthread_create(&stream->send_thread, NULL, send_thread, stream);
 	if (ret != 0) {
-		RTMP_Close(&stream->rtmp);
+		//RTMP_Close(&stream->rtmp);
 		warn("Failed to create send thread");
 		return OBS_OUTPUT_ERROR;
 	}
 
 	os_atomic_set_bool(&stream->active, true);
+	/*
 	while (next) {
 		if (!send_meta_data(stream, idx++, &next)) {
 			warn("Disconnected while attempting to connect to "
@@ -523,12 +546,14 @@ static int init_send(struct ftl_stream *stream)
 			return OBS_OUTPUT_DISCONNECTED;
 		}
 	}
+	*/
 	obs_output_begin_data_capture(stream->output, 0);
 
 	return OBS_OUTPUT_SUCCESS;
 }
 
 #ifdef _WIN32
+/*
 static void win32_log_interface_type(struct ftl_stream *stream)
 {
 	RTMP *rtmp = &stream->rtmp;
@@ -583,17 +608,42 @@ static void win32_log_interface_type(struct ftl_stream *stream)
 		}
 	}
 }
+*/
 #endif
 
 static int try_connect(struct ftl_stream *stream)
 {
+	ftl_status_t status_code;
+	
 	if (dstr_is_empty(&stream->path)) {
 		warn("URL is empty");
 		return OBS_OUTPUT_BAD_PATH;
 	}
 
-	info("Connecting to RTMP URL %s...", stream->path.array);
+	info("Connecting to FTL Ingest URL %s...", stream->path.array);
 
+	ftl_set_ingest_location(stream->stream_config, stream->path.array);
+	ftl_set_authetication_key(stream->stream_config, stream->channel_id, stream->key.array);	
+
+	stream->video_component = ftl_create_video_component(FTL_VIDEO_H264, 96, stream->video_ssrc, stream->scale_width, stream->scale_height);
+	ftl_attach_video_component_to_stream(stream->stream_config, stream->video_component);
+
+	stream->audio_component = ftl_create_audio_component(FTL_AUDIO_OPUS, 97, stream->audio_ssrc);
+	blog(LOG_WARNING, "FTL ssrc: video %d, audio %d\n", stream->audio_ssrc, stream->video_ssrc);
+	ftl_attach_audio_component_to_stream(stream->stream_config, stream->audio_component);
+
+	status_code = ftl_activate_stream(stream->stream_config);
+
+	int obs_status = map_ftl_error_to_obs_error(status_code);
+
+	if (status_code != FTL_SUCCESS) {
+		blog(LOG_ERROR, "Failed to initialize FTL Stream");
+		ftl_destory_stream(&(stream->stream_config));
+		stream->stream_config = 0;
+		return obs_status;
+	}
+
+/*
 	memset(&stream->rtmp.Link, 0, sizeof(stream->rtmp.Link));
 	if (!RTMP_SetupURL(&stream->rtmp, stream->path.array))
 		return OBS_OUTPUT_BAD_PATH;
@@ -630,7 +680,8 @@ static int try_connect(struct ftl_stream *stream)
 	}
 
 	RTMP_AddStream(&stream->rtmp, stream->key.array);
-
+*/
+/*
 	for (size_t idx = 1;; idx++) {
 		obs_encoder_t *encoder = obs_output_get_audio_encoder(
 				stream->output, idx);
@@ -640,9 +691,11 @@ static int try_connect(struct ftl_stream *stream)
 			break;
 
 		encoder_name = obs_encoder_get_name(encoder);
-		RTMP_AddStream(&stream->rtmp, encoder_name);
-	}
+		//RTMP_AddStream(&stream->rtmp, encoder_name);
 
+	}
+	*/
+/*
 	stream->rtmp.m_outChunkSize       = 4096;
 	stream->rtmp.m_bSendChunkSizeInfo = true;
 	stream->rtmp.m_bUseNagle          = true;
@@ -655,84 +708,19 @@ static int try_connect(struct ftl_stream *stream)
 		return OBS_OUTPUT_CONNECT_FAILED;
 	if (!RTMP_ConnectStream(&stream->rtmp, 0))
 		return OBS_OUTPUT_INVALID_STREAM;
+*/
 
 	info("Connection to %s successful", stream->path.array);
 
 	return init_send(stream);
 }
 
-static bool init_connect(struct ftl_stream *stream)
-{
-	obs_service_t *service;
-	obs_data_t *settings;
-	const char *bind_ip;
-
-	if (stopping(stream))
-		pthread_join(stream->send_thread, NULL);
-
-	free_packets(stream);
-
-	service = obs_output_get_service(stream->output);
-	if (!service)
-		return false;
-
-	os_atomic_set_bool(&stream->disconnected, false);
-	stream->total_bytes_sent = 0;
-	stream->dropped_frames   = 0;
-	stream->min_drop_dts_usec= 0;
-	stream->min_priority     = 0;
-
-	settings = obs_output_get_settings(stream->output);
-	dstr_copy(&stream->path,     obs_service_get_url(service));
-	dstr_copy(&stream->key,      obs_service_get_key(service));
-	dstr_copy(&stream->username, obs_service_get_username(service));
-	dstr_copy(&stream->password, obs_service_get_password(service));
-	dstr_depad(&stream->path);
-	dstr_depad(&stream->key);
-	stream->drop_threshold_usec =
-		(int64_t)obs_data_get_int(settings, OPT_DROP_THRESHOLD) * 1000;
-	stream->max_shutdown_time_sec =
-		(int)obs_data_get_int(settings, OPT_MAX_SHUTDOWN_TIME_SEC);
-
-	bind_ip = obs_data_get_string(settings, OPT_BIND_IP);
-	dstr_copy(&stream->bind_ip, bind_ip);
-
-	obs_data_release(settings);
-	return true;
-}
-
-static void *connect_thread(void *data)
-{
-	struct ftl_stream *stream = data;
-	int ret;
-
-	os_set_thread_name("rtmp-stream: connect_thread");
-
-	if (!init_connect(stream)) {
-		obs_output_signal_stop(stream->output, OBS_OUTPUT_BAD_PATH);
-		return NULL;
-	}
-
-	ret = try_connect(stream);
-
-	if (ret != OBS_OUTPUT_SUCCESS) {
-		obs_output_signal_stop(stream->output, ret);
-		info("Connection to %s failed: %d", stream->path.array, ret);
-	}
-
-	if (!stopping(stream))
-		pthread_detach(stream->connect_thread);
-
-	os_atomic_set_bool(&stream->connecting, false);
-	return NULL;
-}
-*/
 static bool ftl_stream_start(void *data)
 {
 	struct ftl_stream *stream = data;
 
 	info("ftl_stream_start\n");
-/*
+
 	if (!obs_output_can_begin_data_capture(stream->output, 0))
 		return false;
 	if (!obs_output_initialize_encoders(stream->output, 0))
@@ -741,9 +729,8 @@ static bool ftl_stream_start(void *data)
 	os_atomic_set_bool(&stream->connecting, true);
 	return pthread_create(&stream->connect_thread, NULL, connect_thread,
 			stream) == 0;
-			*/
 }
-/*
+
 static inline bool add_packet(struct ftl_stream *stream,
 		struct encoder_packet *packet)
 {
@@ -757,7 +744,7 @@ static inline size_t num_buffered_packets(struct ftl_stream *stream)
 {
 	return stream->packets.size / sizeof(struct encoder_packet);
 }
-
+/*
 static void drop_frames(struct ftl_stream *stream)
 {
 	struct circlebuf new_buf            = {0};
@@ -935,6 +922,135 @@ static int ftl_stream_dropped_frames(void *data)
 	info("ftl_stream_dropped_frames\n");
 	return 0;
 	//return stream->dropped_frames;
+}
+
+
+
+/*********************************************************************/
+
+
+static void *connect_thread(void *data)
+{
+	struct ftl_stream *stream = data;
+	int ret;
+
+	os_set_thread_name("ftl-stream: connect_thread");
+
+	blog(LOG_WARNING, "ftl-stream: connect thread\n");
+
+	if (!init_connect(stream)) {
+		obs_output_signal_stop(stream->output, OBS_OUTPUT_BAD_PATH);
+		return NULL;
+	}
+
+	ret = try_connect(stream);
+
+	if (ret != OBS_OUTPUT_SUCCESS) {
+		obs_output_signal_stop(stream->output, ret);
+		info("Connection to %s failed: %d", stream->path.array, ret);
+	}
+
+	if (!stopping(stream))
+		pthread_detach(stream->connect_thread);
+
+	os_atomic_set_bool(&stream->connecting, false);
+	return NULL;
+}
+
+void log_libftl_messages(ftl_log_severity_t log_level, const char * message)
+{
+	UNUSED_PARAMETER(log_level);
+  blog(LOG_WARNING, "[libftl] %s", message);
+}
+
+static bool init_connect(struct ftl_stream *stream)
+{
+	obs_service_t *service;
+	obs_data_t *settings;
+	const char *bind_ip, *key;
+	char stream_key[25];
+
+	info("init_connect\n");
+
+	if (stopping(stream))
+		pthread_join(stream->send_thread, NULL);
+
+	free_packets(stream);
+
+	service = obs_output_get_service(stream->output);
+	if (!service)
+		return false;
+
+	os_atomic_set_bool(&stream->disconnected, false);
+	stream->total_bytes_sent = 0;
+	stream->dropped_frames   = 0;
+	stream->min_drop_dts_usec= 0;
+	stream->min_priority     = 0;
+
+	settings = obs_output_get_settings(stream->output);
+	dstr_copy(&stream->path,     obs_service_get_url(service));
+	key = obs_service_get_key(service);
+	sscanf(key, "%d-%s", &stream->channel_id, stream_key);
+
+	info("key: %s, Stream key %s, channel id %d\n", key, stream->channel_id, stream_key);
+
+	//dstr_copy(&stream->key,      obs_service_get_key(service));
+	dstr_copy(&stream->key,      stream_key);
+	dstr_copy(&stream->username, obs_service_get_username(service));
+	dstr_copy(&stream->password, obs_service_get_password(service));
+	dstr_depad(&stream->path);
+	dstr_depad(&stream->key);
+/*	
+	stream->drop_threshold_usec =
+		(int64_t)obs_data_get_int(settings, OPT_DROP_THRESHOLD) * 1000;
+	stream->max_shutdown_time_sec =
+		(int)obs_data_get_int(settings, OPT_MAX_SHUTDOWN_TIME_SEC);
+*/
+	bind_ip = obs_data_get_string(settings, OPT_BIND_IP);
+	dstr_copy(&stream->bind_ip, bind_ip);
+
+	obs_data_release(settings);
+	return true;
+}
+
+// Returns 0 on success
+int map_ftl_error_to_obs_error(int status) {
+	/* Map FTL errors to OBS errors */
+	int ftl_to_obs_error_code = 0;
+	#if 0
+	switch (status) {
+		case FTL_SUCCESS:
+			break;
+		case FTL_DNS_FAILURE:
+			ftl_to_obs_error_code = OBS_OUTPUT_FTL_DNS_FAILURE;
+			break;
+		case FTL_CONNECT_ERROR:
+			ftl_to_obs_error_code = OBS_OUTPUT_FTL_CONNECT_FAILURE;
+			break;
+		case FTL_OLD_VERSION:
+			ftl_to_obs_error_code = OBS_OUTPUT_FTL_OLD_VERSION;
+			break;
+		case FTL_STREAM_REJECTED:
+			ftl_to_obs_error_code = OBS_OUTPUT_FTL_STREAM_REJECTED;
+			break;
+		case FTL_UNAUTHORIZED:
+			ftl_to_obs_error_code = OBS_OUTPUT_FTL_UNAUTHORIZED;
+			break;
+		case FTL_AUDIO_SSRC_COLLISION:
+			/* SSRC collision, let's back up and try with a new audio SSRC */
+			ftl_to_obs_error_code = OBS_OUTPUT_FTL_AUDIO_SSRC_COLLISION;
+			break;
+		case FTL_VIDEO_SSRC_COLLISION:
+			ftl_to_obs_error_code = OBS_OUTPUT_FTL_VIDEO_SSRC_COLLISION;
+			break;
+		/* Non-specific failures, or internal Tachyon bug */
+		default:
+			/* Unknown FTL error */
+			blog (LOG_ERROR, "tachyon error mapping needs to be updated!");
+			ftl_to_obs_error_code = OBS_OUTPUT_ERROR;
+	}
+#endif
+	return ftl_to_obs_error_code;
 }
 
 struct obs_output_info ftl_output_info = {
