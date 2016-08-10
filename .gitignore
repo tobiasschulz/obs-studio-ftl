@@ -43,6 +43,7 @@ Makefile.in
 Makefile
 
 #random useless file stuff
+*.vscode
 *.dmg
 *.app
 .DS_Store
