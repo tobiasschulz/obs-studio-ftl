@@ -67,7 +67,7 @@ int FTL_init_data(ftl_t *ftl, char *ingest) {
 	ftl->video_timestamp = 0;
 	ftl->video_timestamp_step = 90000 / 30;
 	ftl->audio_timestamp = 0;
-	ftl->audio_timestamp_step = 8000 / 50;
+	ftl->audio_timestamp_step = 48000 / 50;
 	ftl->video_ssrc = 0x12345678;
 
 	return 0;
@@ -152,7 +152,7 @@ int _make_audio_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, in
 
 	uint32_t rtp_header;
 
-	rtp_header = htonl((2 << 30) | (ftl->audio_ptype << 16) | ftl->audio_sn);
+	rtp_header = htonl((2 << 30) | (1 << 23) | (ftl->audio_ptype << 16) | ftl->audio_sn);
 	*((uint32_t*)out)++ = rtp_header;
 	rtp_header = htonl(ftl->audio_timestamp);
 	*((uint32_t*)out)++ = rtp_header;

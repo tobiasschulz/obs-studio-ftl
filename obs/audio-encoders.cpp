@@ -15,6 +15,7 @@ using namespace std;
 
 static const string encoders[] = {
 	"ffmpeg_aac",
+	"ffmpeg_opus",
 	"mf_aac",
 	"libfdk_aac",
 	"CoreAudio_AAC",
@@ -143,7 +144,12 @@ static const char *GetCodec(const char *id)
 	return NullToEmpty(obs_get_encoder_codec(id));
 }
 
+#ifdef AUDIO_USE_OPUS
+static const string opus_ = "OPUS";
+#else
 static const string aac_ = "AAC";
+#endif
+
 static void PopulateBitrateMap()
 {
 	call_once(populateBitrateMap, []()
@@ -161,7 +167,11 @@ static void PopulateBitrateMap()
 				end(encoders))
 				continue;
 
+#ifdef AUDIO_USE_OPUS
+			if (opus_ != GetCodec(id))
+#else
 			if (aac_ != GetCodec(id))
+#endif
 				continue;
 
 			HandleEncoderProperties(id);
@@ -171,7 +181,11 @@ static void PopulateBitrateMap()
 			if (encoder == fallbackEncoder)
 				continue;
 
+#ifdef AUDIO_USE_OPUS
+			if (opus_ != GetCodec(encoder.c_str()))
+#else
 			if (aac_ != GetCodec(encoder.c_str()))
+#endif
 				continue;
 
 			HandleEncoderProperties(encoder.c_str());

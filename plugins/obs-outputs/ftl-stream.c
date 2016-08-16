@@ -385,7 +385,7 @@ static void *send_thread(void *data)
 			}
 		}
 
-
+		/*sends sps/pps on every key frame as this is typically required for webrtc*/
 		if (packet.keyframe) {
 			if (!send_headers(stream)) {
 				os_atomic_set_bool(&stream->disconnected, true);
@@ -1108,8 +1108,7 @@ struct obs_output_info ftl_output_info = {
 	.id                 = "ftl_output",
 	.flags              = OBS_OUTPUT_AV |
 	                      OBS_OUTPUT_ENCODED |
-	                      OBS_OUTPUT_SERVICE |
-	                      OBS_OUTPUT_MULTI_TRACK,
+	                      OBS_OUTPUT_SERVICE,
 	.get_name           = ftl_stream_getname,
 	.create             = ftl_stream_create,
 	.destroy            = ftl_stream_destroy,
