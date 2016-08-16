@@ -25,7 +25,16 @@
 #ifndef __FTL_H
 #define __FTL_H
 
+#include <obs-module.h>
+#include <obs-avc.h>
+#include <util/platform.h>
+#include <util/circlebuf.h>
+#include <util/dstr.h>
+#include <util/threading.h>
+#include <inttypes.h>
+
 #include <stdint.h>
+#include <winsock2.h>
 
 #ifdef _WIN32
 #	ifdef __FTL_INTERNAL
@@ -40,6 +49,11 @@
 FTL_API extern const int FTL_VERSION_MAJOR;
 FTL_API extern const int FTL_VERSION_MINOR;
 FTL_API extern const int FTL_VERSION_MAINTENANCE;
+
+#define BUFLEN 1500  //Max length of buffer
+#define FTL_UDP_DATA_PORT 8082   //The port on which to listen for incoming data
+#define RTP_HEADER_BASE_LEN 12
+#define RTP_FUA_HEADER_LEN 2
 
 /*! \defgroup ftl_public Public Interfaces for libftl */
 
@@ -129,6 +143,21 @@ typedef struct {
 /*! \brief Function prototype for FTL logging callback
  * \ingroup ftl_public
  */
+
+typedef struct {
+	pthread_t recv_thread;
+	SOCKET data_sock;
+	struct sockaddr_in server_addr;
+	int max_mtu;
+	uint8_t *pktBuf;
+	uint32_t timestamp;
+	uint32_t timestamp_step;
+	uint32_t video_ssrc;
+	uint8_t video_ptype;
+	uint8_t audio_ptype;
+	uint16_t video_sn;
+	uint16_t audio_sn;
+} ftl_t;
 
 typedef void (*ftl_logging_function_t)(ftl_log_severity_t log_level, const char * log_message);
 
@@ -301,6 +330,9 @@ FTL_API void ftl_destory_stream(ftl_stream_configuration_t** stream_config);
  */
 
 FTL_API void ftl_register_log_handler(ftl_logging_function_t log_func);
+
+int FTL_init_data(ftl_t *ftl, char *ingest);
+int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx);
 
 // Load the internal API if necessary
 #ifdef __FTL_INTERNAL

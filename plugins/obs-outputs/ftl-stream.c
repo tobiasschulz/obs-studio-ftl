@@ -85,8 +85,9 @@ struct ftl_stream {
 	int              dropped_frames;
 
 //	RTMP             rtmp;
-  SOCKET           sb_socket;
-  uint32_t         audio_ssrc, video_ssrc, scale_width, scale_height;
+	ftl_t            ftl;
+	SOCKET           sb_socket;
+	uint32_t         audio_ssrc, video_ssrc, scale_width, scale_height;
 	ftl_stream_configuration_t* stream_config;
 	ftl_stream_video_component_t* video_component;
 	ftl_stream_audio_component_t* audio_component;
@@ -199,6 +200,8 @@ static void *ftl_stream_create(obs_data_t *settings, obs_output_t *output)
 	
 	stream->output = output;
 	pthread_mutex_init_value(&stream->packets_mutex);
+
+	//FTL_LogSetCallback(log_ftl);
 /*
 	RTMP_Init(&stream->rtmp);
 	RTMP_LogSetCallback(log_rtmp);
@@ -325,7 +328,7 @@ static int send_packet(struct ftl_stream *stream,
 	size_t  size;
 	int     recv_size = 0;
 	int     ret = 0;
-
+#if 0
 #ifdef _WIN32
 	ret = ioctlsocket(stream->sb_socket, FIONREAD,
 			(u_long*)&recv_size);
@@ -337,17 +340,23 @@ static int send_packet(struct ftl_stream *stream,
 		if (!discard_recv_data(stream, (size_t)recv_size))
 			return -1;
 	}
-
+#endif
 	flv_packet_mux(packet, &data, &size, is_header);
 #ifdef TEST_FRAMEDROPS
 	os_sleep_ms(rand() % 40);
 #endif
 	//ret = RTMP_Write(&stream->rtmp, (char*)data, (int)size, (int)idx);
-	bfree(data);
+	ret = FTL_sendPackets(&stream->ftl, packet, (int)idx);
+	/*
+	info("ftl data: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
+		data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+		data[16], data[17], data[18], data[19], data[20], data[21], data[22], data[23], data[24], data[25], data[26], data[27], data[28], data[29], data[30], data[31]);
+		*/
+	//bfree(data);
 
 	obs_free_encoder_packet(packet);
 
-	stream->total_bytes_sent += size;
+	stream->total_bytes_sent += packet->size;
 	return ret;
 }
 
@@ -645,6 +654,13 @@ static int try_connect(struct ftl_stream *stream)
 	}
 
 /*
+	obs_data_get_frames_per_second(obs_data_t *data,
+		const char *name,
+		struct media_frames_per_second *fps, const char **option);
+*/
+	FTL_init_data(&(stream->ftl), stream->path.array);
+
+/*
 	memset(&stream->rtmp.Link, 0, sizeof(stream->rtmp.Link));
 	if (!RTMP_SetupURL(&stream->rtmp, stream->path.array))
 		return OBS_OUTPUT_BAD_PATH;
@@ -745,7 +761,7 @@ static inline size_t num_buffered_packets(struct ftl_stream *stream)
 {
 	return stream->packets.size / sizeof(struct encoder_packet);
 }
-/*
+
 static void drop_frames(struct ftl_stream *stream)
 {
 	struct circlebuf new_buf            = {0};
@@ -814,27 +830,27 @@ static void check_to_drop_frames(struct ftl_stream *stream)
 static bool add_video_packet(struct ftl_stream *stream,
 		struct encoder_packet *packet)
 {
-	check_to_drop_frames(stream);
+//	check_to_drop_frames(stream);
 
 	// if currently dropping frames, drop packets until it reaches the
 	// desired priority 
 	if (packet->priority < stream->min_priority) {
 		stream->dropped_frames++;
-		return false;
+		//return false;
 	} else {
 		stream->min_priority = 0;
 	}
 
 	return add_packet(stream, packet);
 }
-*/
+
 
 static void ftl_stream_data(void *data, struct encoder_packet *packet)
 {
 	struct ftl_stream    *stream = data;
 
 	info("ftl_stream_data\n");
-	/*
+
 	struct encoder_packet new_packet;
 	bool                  added_packet = false;
 
@@ -860,7 +876,6 @@ static void ftl_stream_data(void *data, struct encoder_packet *packet)
 		os_sem_post(stream->send_sem);
 	else
 		obs_free_encoder_packet(&new_packet);
-		*/
 }
 
 static void ftl_stream_defaults(obs_data_t *defaults)
@@ -921,8 +936,7 @@ static int ftl_stream_dropped_frames(void *data)
 {
 	struct ftl_stream *stream = data;
 	info("ftl_stream_dropped_frames\n");
-	return 0;
-	//return stream->dropped_frames;
+	return stream->dropped_frames;
 }
 
 
@@ -994,18 +1008,12 @@ static bool init_connect(struct ftl_stream *stream)
 
 	info("Key is %s\n", key);
 
-	info("hi\n");
-
 	if(!get_stream_key_and_channel_id(key, &(stream->channel_id), stream_key)){
 		info("Unable to parse stream key\n");
 		return false;
 	}
 
-	info("hi\n");
-
 	info("key: %s, Stream key %s, channel id %d\n", key, stream_key, stream->channel_id);
-
-	info("hi\n");
 
 	//dstr_copy(&stream->key,      obs_service_get_key(service));
 	dstr_copy(&stream->key,      stream_key);
