@@ -659,6 +659,10 @@ static int try_connect(struct ftl_stream *stream)
 		struct media_frames_per_second *fps, const char **option);
 */
 	FTL_init_data(&(stream->ftl), stream->path.array);
+	FTL_set_video_ptype(&stream->ftl, 96);
+	FTL_set_audio_ptype(&stream->ftl, 97);
+	FTL_set_video_ssrc(&stream->ftl, stream->video_ssrc);
+	FTL_set_audio_ssrc(&stream->ftl, stream->audio_ssrc);
 
 /*
 	memset(&stream->rtmp.Link, 0, sizeof(stream->rtmp.Link));
@@ -849,7 +853,7 @@ static void ftl_stream_data(void *data, struct encoder_packet *packet)
 {
 	struct ftl_stream    *stream = data;
 
-	info("ftl_stream_data\n");
+//	info("ftl_stream_data\n");
 
 	struct encoder_packet new_packet;
 	bool                  added_packet = false;
@@ -924,7 +928,7 @@ static obs_properties_t *ftl_stream_properties(void *unused)
 static uint64_t ftl_stream_total_bytes_sent(void *data)
 {
 	struct ftl_stream *stream = data;
-	info("ftl_stream_total_bytes_sent\n");
+	//info("ftl_stream_total_bytes_sent\n");
 
 	return 0;
 	/*
@@ -935,7 +939,7 @@ static uint64_t ftl_stream_total_bytes_sent(void *data)
 static int ftl_stream_dropped_frames(void *data)
 {
 	struct ftl_stream *stream = data;
-	info("ftl_stream_dropped_frames\n");
+	//info("ftl_stream_dropped_frames\n");
 	return stream->dropped_frames;
 }
 
@@ -1021,6 +1025,9 @@ static bool init_connect(struct ftl_stream *stream)
 	dstr_copy(&stream->password, obs_service_get_password(service));
 	dstr_depad(&stream->path);
 	dstr_depad(&stream->key);
+
+	stream->audio_ssrc = stream->channel_id;
+	stream->video_ssrc = stream->channel_id + 1;
 /*	
 	stream->drop_threshold_usec =
 		(int64_t)obs_data_get_int(settings, OPT_DROP_THRESHOLD) * 1000;

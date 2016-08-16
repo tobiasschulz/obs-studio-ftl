@@ -150,13 +150,17 @@ typedef struct {
 	struct sockaddr_in server_addr;
 	int max_mtu;
 	uint8_t *pktBuf;
-	uint32_t timestamp;
-	uint32_t timestamp_step;
+	uint32_t video_timestamp;
+	uint32_t video_timestamp_step;
+	uint32_t audio_timestamp;
+	uint32_t audio_timestamp_step;
 	uint32_t video_ssrc;
+	uint32_t audio_ssrc;
 	uint8_t video_ptype;
 	uint8_t audio_ptype;
 	uint16_t video_sn;
 	uint16_t audio_sn;
+	uint8_t current_nalu_type;
 } ftl_t;
 
 typedef void (*ftl_logging_function_t)(ftl_log_severity_t log_level, const char * log_message);
@@ -333,6 +337,10 @@ FTL_API void ftl_register_log_handler(ftl_logging_function_t log_func);
 
 int FTL_init_data(ftl_t *ftl, char *ingest);
 int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx);
+int FTL_set_video_ptype(ftl_t *ftl, uint8_t p_type);
+int FTL_set_audio_ptype(ftl_t *ftl, uint8_t p_type);
+int FTL_set_video_ssrc(ftl_t *ftl, uint32_t ssrc);
+int FTL_set_audio_ssrc(ftl_t *ftl, uint32_t ssrc);
 
 // Load the internal API if necessary
 #ifdef __FTL_INTERNAL

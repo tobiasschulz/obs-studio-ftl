@@ -741,8 +741,11 @@ AdvancedOutput::AdvancedOutput(OBSBasic *main_) : BasicOutputHandler(main_)
 	OBSData streamEncSettings = GetDataFromJsonFile("streamEncoder.json");
 	OBSData recordEncSettings = GetDataFromJsonFile("recordEncoder.json");
 
-	streamOutput = obs_output_create("rtmp_output", "adv_stream",
-			nullptr, nullptr);
+//	streamOutput = obs_output_create("rtmp_output", "adv_stream",
+//			nullptr, nullptr);
+	streamOutput = obs_output_create("ftl_output", "adv_stream",
+		nullptr, nullptr);
+
 	if (!streamOutput)
 		throw "Failed to create stream output (advanced output)";
 	obs_output_release(streamOutput);

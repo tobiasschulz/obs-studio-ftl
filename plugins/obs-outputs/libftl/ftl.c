@@ -62,15 +62,42 @@ int FTL_init_data(ftl_t *ftl, char *ingest) {
 	}
 
 	ftl->video_sn=0;
+	ftl->audio_sn = 0;
 	ftl->video_ptype = 96;
-	ftl->timestamp = 0;
-	ftl->timestamp_step = 90000 / 30;
+	ftl->video_timestamp = 0;
+	ftl->video_timestamp_step = 90000 / 30;
+	ftl->audio_timestamp = 0;
+	ftl->audio_timestamp_step = 8000 / 50;
 	ftl->video_ssrc = 0x12345678;
 
 	return 0;
 }
 
-int _make_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, int *out_len, int first_pkt, int mbit) {
+int FTL_set_audio_ssrc(ftl_t *ftl, uint32_t ssrc) {
+	ftl->audio_ssrc = ssrc;
+
+	return 0;
+}
+
+int FTL_set_video_ssrc(ftl_t *ftl, uint32_t ssrc) {
+	ftl->video_ssrc = ssrc;
+
+	return 0;
+}
+
+int FTL_set_audio_ptype(ftl_t *ftl, uint8_t p_type) {
+	ftl->audio_ptype = p_type;
+
+	return 0;
+}
+
+int FTL_set_video_ptype(ftl_t *ftl, uint8_t p_type) {
+	ftl->video_ptype = p_type;
+
+	return 0;
+}
+
+int _make_video_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, int *out_len, int first_pkt, int mbit) {
 	uint8_t sbit, ebit;
 	int frag_len;
 
@@ -81,34 +108,66 @@ int _make_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, int *out
 
 	rtp_header = htonl((2 << 30) | (mbit << 23) | (ftl->video_ptype << 16) | ftl->video_sn);
 	*((uint32_t*)out)++ = rtp_header;
-	rtp_header = htonl(ftl->timestamp);
+	rtp_header = htonl(ftl->video_timestamp);
 	*((uint32_t*)out)++ = rtp_header;
 	rtp_header = htonl(ftl->video_ssrc);
 	*((uint32_t*)out)++ = rtp_header;
 
 	ftl->video_sn++;
 	if (mbit) {
-		ftl->timestamp += ftl->timestamp_step;
+		ftl->video_timestamp += ftl->video_timestamp_step;
 	}
 
-	out[0] = in[0] & 0xE0 | 28;
-	out[1] = (sbit << 7) | (ebit << 6) | (in[0] & 0x1F);
-
-	out += 2;
-
-	frag_len = ftl->max_mtu - RTP_HEADER_BASE_LEN - RTP_FUA_HEADER_LEN;
-
-	if (frag_len > in_len) {
+	if (sbit && ebit) {
 		frag_len = in_len;
+		*out_len = frag_len + RTP_HEADER_BASE_LEN;
+		memcpy(out, in, frag_len);
+	} else {
+
+		if (sbit) {
+			ftl->current_nalu_type = in[0];
+			in += 1;
+		}
+
+		out[0] = ftl->current_nalu_type & 0xE0 | 28;
+		out[1] = (sbit << 7) | (ebit << 6) | (ftl->current_nalu_type & 0x1F);
+
+		out += 2;
+		
+		frag_len = ftl->max_mtu - RTP_HEADER_BASE_LEN - RTP_FUA_HEADER_LEN;
+
+		if (frag_len > in_len) {
+			frag_len = in_len;
+		}
+
+		memcpy(out, in, frag_len - sbit);
+
+		*out_len = frag_len - sbit + RTP_HEADER_BASE_LEN + RTP_FUA_HEADER_LEN;
 	}
 
-	in += 1;
+	return frag_len;
+}
 
-	memcpy(out, in, frag_len);
+int _make_audio_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, int *out_len) {
+	int payload_len = in_len;
 
-	*out_len = frag_len + RTP_HEADER_BASE_LEN + RTP_FUA_HEADER_LEN;
+	uint32_t rtp_header;
 
-	return frag_len + 1;
+	rtp_header = htonl((2 << 30) | (ftl->audio_ptype << 16) | ftl->audio_sn);
+	*((uint32_t*)out)++ = rtp_header;
+	rtp_header = htonl(ftl->audio_timestamp);
+	*((uint32_t*)out)++ = rtp_header;
+	rtp_header = htonl(ftl->audio_ssrc);
+	*((uint32_t*)out)++ = rtp_header;
+
+	ftl->audio_sn++;
+	ftl->audio_timestamp += ftl->audio_timestamp_step;
+
+	memcpy(out, in, payload_len);
+
+	*out_len = payload_len + RTP_HEADER_BASE_LEN;
+
+	return in_len;
 }
 
 int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx){
@@ -123,7 +182,7 @@ int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx){
 			consumed += 4;
 			p += 4;
 
-			info("Got Video Packet of type %d size %d (%02X %02X %02X %02X %02X %02X %02X %02X)\n", p[0] & 0x1F, len, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+			//info("Got Video Packet of type %d size %d (%02X %02X %02X %02X %02X %02X %02X %02X)\n", p[0] & 0x1F, len, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
 
 			int pkt_len;
 			uint8_t *tmp;
@@ -134,13 +193,15 @@ int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx){
 			int first_fu = 1;
 
 			while(remaining > 0) {
-				int mbit = (packet->size - consumed + RTP_HEADER_BASE_LEN + RTP_FUA_HEADER_LEN) < ftl->max_mtu ? 1 : 0;
-				payload_size = _make_rtp_packet(ftl, tmp, remaining, ftl->pktBuf, &pkt_len, first_fu, mbit);
+				int mbit = 0;
+				if ((packet->size - consumed) == remaining && (remaining + RTP_HEADER_BASE_LEN + RTP_FUA_HEADER_LEN) < ftl->max_mtu) {
+					mbit = 1;
+				}
+				payload_size = _make_video_rtp_packet(ftl, tmp, remaining, ftl->pktBuf, &pkt_len, first_fu, mbit);
 
 				if (sendto(ftl->data_sock, ftl->pktBuf, pkt_len, 0, (struct sockaddr*) &ftl->server_addr, sizeof(ftl->server_addr)) == SOCKET_ERROR)
 				{
 					warn("sendto() failed with error code : %d", WSAGetLastError());
-					exit(EXIT_FAILURE);
 				}
 				first_fu = 0;
 				tmp += payload_size;
@@ -151,6 +212,15 @@ int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx){
 			}
 		}
 
+	}
+	else if(packet->type == OBS_ENCODER_AUDIO) {
+		int pkt_len;
+		_make_audio_rtp_packet(ftl, packet->data, packet->size, ftl->pktBuf, &pkt_len);
+
+		if (sendto(ftl->data_sock, ftl->pktBuf, pkt_len, 0, (struct sockaddr*) &ftl->server_addr, sizeof(ftl->server_addr)) == SOCKET_ERROR)
+		{
+			warn("sendto() failed with error code : %d", WSAGetLastError());
+		}
 	}
 
 	return 0;
@@ -202,7 +272,7 @@ static void *recv_thread(void *data)
 #endif
 
 		if (ret > 0) {
-			printf("Got recv of size %d bytes\n", ret);
+			info("Got recv of size %d bytes\n", ret);
 		}
 	}
 

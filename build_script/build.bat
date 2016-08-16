@@ -13,5 +13,6 @@ call git submodule update --init
 popd
 cmake -G "Visual Studio 14 2015 Win64" -DOBS_VERSION_OVERRIDE=%obs_version% -DFTLSDK_LIB=%ftl_lib_dir% -DFTLSDK_INCLUDE_DIR=%ftl_inc_dir% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true ..
 call msbuild /p:Configuration=%build_config%,Platform=x64 ALL_BUILD.vcxproj || exit /b
-copy %coredeps%\win64\bin\postproc-54.dll rundir\%build_config%\bin\64bit
+copy %coredeps%\win64\bin\postproc-54.dll rundir\Debug\bin\64bit
+copy %coredeps%\win64\bin\postproc-54.dll rundir\Release\bin\64bit
 

@@ -44,6 +44,7 @@ if(WIN32)
 		libftl/components.c
 		libftl/deactivate.c
 		libftl/init.c
+		libftl/ftl.c
 		libftl/stream_configuration.c
 		libftl/logging.c
 		libftl/posix/socket.c
