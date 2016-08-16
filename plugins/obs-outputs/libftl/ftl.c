@@ -97,7 +97,7 @@ int FTL_set_video_ptype(ftl_t *ftl, uint8_t p_type) {
 	return 0;
 }
 
-int _make_video_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, int *out_len, int first_pkt, int mbit) {
+int _make_video_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, int *out_len, int first_pkt) {
 	uint8_t sbit, ebit;
 	int frag_len;
 
@@ -106,7 +106,7 @@ int _make_video_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, in
 
 	uint32_t rtp_header;
 
-	rtp_header = htonl((2 << 30) | (mbit << 23) | (ftl->video_ptype << 16) | ftl->video_sn);
+	rtp_header = htonl((2 << 30) | (ftl->video_ptype << 16) | ftl->video_sn);
 	*((uint32_t*)out)++ = rtp_header;
 	rtp_header = htonl(ftl->video_timestamp);
 	*((uint32_t*)out)++ = rtp_header;
@@ -114,11 +114,9 @@ int _make_video_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, in
 	*((uint32_t*)out)++ = rtp_header;
 
 	ftl->video_sn++;
-	if (mbit) {
-		ftl->video_timestamp += ftl->video_timestamp_step;
-	}
 
 	if (sbit && ebit) {
+		sbit = ebit = 0;
 		frag_len = in_len;
 		*out_len = frag_len + RTP_HEADER_BASE_LEN;
 		memcpy(out, in, frag_len);
@@ -140,12 +138,12 @@ int _make_video_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, in
 			frag_len = in_len;
 		}
 
-		memcpy(out, in, frag_len - sbit);
+		memcpy(out, in, frag_len);
 
-		*out_len = frag_len - sbit + RTP_HEADER_BASE_LEN + RTP_FUA_HEADER_LEN;
+		*out_len = frag_len + RTP_HEADER_BASE_LEN + RTP_FUA_HEADER_LEN;
 	}
 
-	return frag_len;
+	return frag_len + sbit;
 }
 
 int _make_audio_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, int *out_len) {
@@ -170,45 +168,77 @@ int _make_audio_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, in
 	return in_len;
 }
 
-int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx){
+int _set_marker_bit(ftl_t *ftl, uint8_t *in) {
+	uint32_t rtp_header;
+
+	rtp_header = ntohl(*((uint32_t*)in));
+	rtp_header |= 1 << 23; /*set marker bit*/
+	*((uint32_t*)in) = htonl(rtp_header);
+	
+	ftl->video_timestamp += ftl->video_timestamp_step;
+
+	return 0;
+}
+
+int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx, bool is_header){
 
 	if (packet->type == OBS_ENCODER_VIDEO) {
 		int consumed = 0;
+		int len = packet->size;
 
 		unsigned char *p = packet->data;
 
 		while (consumed < packet->size) {
-			int len = p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
-			consumed += 4;
-			p += 4;
+			if (is_header) {
+				if (consumed == 0) {
+					p += 6; //first 6 bytes are some obs header with part of the sps
+					consumed += 6;
+				} else {
+					p += 1; //another spacer byte of 0x1
+					consumed += 1;
+				}
+
+				len = p[0] << 8 | p[1];
+				p += 2;
+				consumed += 2;
+			}
+			else {
+				len = p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
+
+				if (len > (packet->size - consumed)) {
+					warn("ERROR: got len of %d but packet only has %d left\n", len, (packet->size - consumed));
+				}
+
+				consumed += 4;
+				p += 4;
+			}
 
 			//info("Got Video Packet of type %d size %d (%02X %02X %02X %02X %02X %02X %02X %02X)\n", p[0] & 0x1F, len, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
 
 			int pkt_len;
-			uint8_t *tmp;
 			int payload_size;
 
-			tmp = p;
 			int remaining = len;
 			int first_fu = 1;
 
 			while(remaining > 0) {
-				int mbit = 0;
-				if ((packet->size - consumed) == remaining && (remaining + RTP_HEADER_BASE_LEN + RTP_FUA_HEADER_LEN) < ftl->max_mtu) {
-					mbit = 1;
+
+				payload_size = _make_video_rtp_packet(ftl, p, remaining, ftl->pktBuf, &pkt_len, first_fu);
+
+				first_fu = 0;
+				remaining -= payload_size;
+				consumed += payload_size;
+				p += payload_size;
+
+				/*if all data has been consumed set marker bit*/
+				if ((packet->size - consumed) == 0 && !is_header) {
+					_set_marker_bit(ftl, ftl->pktBuf);
 				}
-				payload_size = _make_video_rtp_packet(ftl, tmp, remaining, ftl->pktBuf, &pkt_len, first_fu, mbit);
 
 				if (sendto(ftl->data_sock, ftl->pktBuf, pkt_len, 0, (struct sockaddr*) &ftl->server_addr, sizeof(ftl->server_addr)) == SOCKET_ERROR)
 				{
 					warn("sendto() failed with error code : %d", WSAGetLastError());
 				}
-				first_fu = 0;
-				tmp += payload_size;
-				remaining -= payload_size;
-
-				p += payload_size;
-				consumed += payload_size;
 			}
 		}
 
@@ -221,6 +251,9 @@ int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx){
 		{
 			warn("sendto() failed with error code : %d", WSAGetLastError());
 		}
+	}
+	else {
+		warn("Got packet type %d\n", packet->type);
 	}
 
 	return 0;

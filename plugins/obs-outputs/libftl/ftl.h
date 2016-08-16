@@ -336,7 +336,7 @@ FTL_API void ftl_destory_stream(ftl_stream_configuration_t** stream_config);
 FTL_API void ftl_register_log_handler(ftl_logging_function_t log_func);
 
 int FTL_init_data(ftl_t *ftl, char *ingest);
-int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx);
+int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx, bool is_header);
 int FTL_set_video_ptype(ftl_t *ftl, uint8_t p_type);
 int FTL_set_audio_ptype(ftl_t *ftl, uint8_t p_type);
 int FTL_set_video_ssrc(ftl_t *ftl, uint32_t ssrc);

@@ -346,7 +346,7 @@ static int send_packet(struct ftl_stream *stream,
 	os_sleep_ms(rand() % 40);
 #endif
 	//ret = RTMP_Write(&stream->rtmp, (char*)data, (int)size, (int)idx);
-	ret = FTL_sendPackets(&stream->ftl, packet, (int)idx);
+	ret = FTL_sendPackets(&stream->ftl, packet, (int)idx, is_header);
 	/*
 	info("ftl data: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
 		data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
@@ -360,7 +360,7 @@ static int send_packet(struct ftl_stream *stream,
 	return ret;
 }
 
-//static inline bool send_headers(struct ftl_stream *stream);
+static inline bool send_headers(struct ftl_stream *stream);
 
 static void *send_thread(void *data)
 {
@@ -385,14 +385,13 @@ static void *send_thread(void *data)
 			}
 		}
 
-/*
-		if (!stream->sent_headers) {
+
+		if (packet.keyframe) {
 			if (!send_headers(stream)) {
 				os_atomic_set_bool(&stream->disconnected, true);
 				break;
 			}
 		}
-*/
 
 		if (send_packet(stream, &packet, false, packet.track_idx) < 0) {
 			os_atomic_set_bool(&stream->disconnected, true);
@@ -461,6 +460,7 @@ static bool send_audio_header(struct ftl_stream *stream, size_t idx,
 	packet.data = bmemdup(header, packet.size);
 	return send_packet(stream, &packet, true, idx) >= 0;
 }
+*/
 
 static bool send_video_header(struct ftl_stream *stream)
 {
@@ -486,19 +486,19 @@ static inline bool send_headers(struct ftl_stream *stream)
 	size_t i = 0;
 	bool next = true;
 
-	if (!send_audio_header(stream, i++, &next))
-		return false;
+//	if (!send_audio_header(stream, i++, &next))
+//		return false;
 	if (!send_video_header(stream))
 		return false;
-
+/*
 	while (next) {
 		if (!send_audio_header(stream, i++, &next))
 			return false;
 	}
-
+*/
 	return true;
 }
-*/
+
 static inline bool reset_semaphore(struct ftl_stream *stream)
 {
 	os_sem_destroy(stream->send_sem);
