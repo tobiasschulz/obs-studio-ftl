@@ -125,6 +125,7 @@ int _make_video_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, in
 		if (sbit) {
 			ftl->current_nalu_type = in[0];
 			in += 1;
+			in_len--;
 		}
 
 		out[0] = ftl->current_nalu_type & 0xE0 | 28;
