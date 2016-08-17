@@ -9,6 +9,12 @@ static void *recv_thread(void *data);
 #define info(format, ...)  do_log(LOG_INFO,    format, ##__VA_ARGS__)
 #define debug(format, ...) do_log(LOG_DEBUG,   format, ##__VA_ARGS__)
 
+int _nack_init(ftl_t *ftl, enum obs_encoder_type type);
+uint8_t* _nack_get_empty_packet(ftl_t *ftl, uint32_t ssrc, uint16_t sn, int *buf_len);
+int _nack_send_packet(ftl_t *ftl, uint32_t ssrc, uint16_t sn, int len);
+int nack_resend_packet(ftl_t *ftl, uint32_t ssrc, uint16_t sn);
+struct media_component *_media_lookup(ftl_t *ftl, uint32_t ssrc);
+
 int FTL_init_data(ftl_t *ftl, char *ingest) {
 	WSADATA wsa;
 	int ret;
@@ -56,43 +62,42 @@ int FTL_init_data(ftl_t *ftl, char *ingest) {
 	}
 
 	ftl->max_mtu = 1392;
-	if ((ftl->pktBuf = (uint8_t*)malloc(ftl->max_mtu)) == NULL) {
-		warn("Failed to alloc memory for pkt buffer\n");
-		return -1;
+
+	for (int i = 0; i < sizeof(ftl->media) / sizeof(ftl->media[0]); i++) {
+		struct media_component *media = &ftl->media[i];
+		media->nack_slots_initalized = false;
+		media->seq_num = 0;
+		media->payload_type = -1;
+		
+		if (OBS_ENCODER_AUDIO == i) {
+			media->timestamp = 0;
+			media->timestamp_step = 48000 / 50;
+		}
+		else if (OBS_ENCODER_VIDEO == i) {
+			media->timestamp = 0;
+			media->timestamp_step = 90000 / 30; //TODO: need to get actual frame rate
+		}
 	}
 
-	ftl->video_sn=0;
-	ftl->audio_sn = 0;
-	ftl->video_ptype = 96;
-	ftl->video_timestamp = 0;
-	ftl->video_timestamp_step = 90000 / 30;
-	ftl->audio_timestamp = 0;
-	ftl->audio_timestamp_step = 48000 / 50;
-	ftl->video_ssrc = 0x12345678;
-
 	return 0;
 }
 
-int FTL_set_audio_ssrc(ftl_t *ftl, uint32_t ssrc) {
-	ftl->audio_ssrc = ssrc;
+int FTL_set_ssrc(ftl_t *ftl, enum obs_encoder_type type, uint32_t ssrc) {
+	
+	int ret = 0;
+	
+	ftl->media[type].ssrc = ssrc;
 
-	return 0;
+	if (ftl->media[type].nack_slots_initalized == false) {
+		ret = _nack_init(ftl, type);
+		ftl->media[type].nack_slots_initalized = true;
+	}
+
+	return ret;
 }
 
-int FTL_set_video_ssrc(ftl_t *ftl, uint32_t ssrc) {
-	ftl->video_ssrc = ssrc;
-
-	return 0;
-}
-
-int FTL_set_audio_ptype(ftl_t *ftl, uint8_t p_type) {
-	ftl->audio_ptype = p_type;
-
-	return 0;
-}
-
-int FTL_set_video_ptype(ftl_t *ftl, uint8_t p_type) {
-	ftl->video_ptype = p_type;
+int FTL_set_ptype(ftl_t *ftl, enum obs_encoder_type type, uint8_t p_type) {
+	ftl->media[type].payload_type = p_type;
 
 	return 0;
 }
@@ -100,20 +105,21 @@ int FTL_set_video_ptype(ftl_t *ftl, uint8_t p_type) {
 int _make_video_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, int *out_len, int first_pkt) {
 	uint8_t sbit, ebit;
 	int frag_len;
+	struct media_component *media = &ftl->media[OBS_ENCODER_VIDEO];
 
 	sbit = first_pkt ? 1 : 0;
 	ebit = (in_len + RTP_HEADER_BASE_LEN + RTP_FUA_HEADER_LEN) < ftl->max_mtu;
 
 	uint32_t rtp_header;
 
-	rtp_header = htonl((2 << 30) | (ftl->video_ptype << 16) | ftl->video_sn);
+	rtp_header = htonl((2 << 30) | (media->payload_type << 16) | media->seq_num);
 	*((uint32_t*)out)++ = rtp_header;
-	rtp_header = htonl(ftl->video_timestamp);
+	rtp_header = htonl(media->timestamp);
 	*((uint32_t*)out)++ = rtp_header;
-	rtp_header = htonl(ftl->video_ssrc);
+	rtp_header = htonl(media->ssrc);
 	*((uint32_t*)out)++ = rtp_header;
 
-	ftl->video_sn++;
+	media->seq_num++;
 
 	if (sbit && ebit) {
 		sbit = ebit = 0;
@@ -123,13 +129,13 @@ int _make_video_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, in
 	} else {
 
 		if (sbit) {
-			ftl->current_nalu_type = in[0];
+			media->fua_nalu_type = in[0];
 			in += 1;
 			in_len--;
 		}
 
-		out[0] = ftl->current_nalu_type & 0xE0 | 28;
-		out[1] = (sbit << 7) | (ebit << 6) | (ftl->current_nalu_type & 0x1F);
+		out[0] = media->fua_nalu_type & 0xE0 | 28;
+		out[1] = (sbit << 7) | (ebit << 6) | (media->fua_nalu_type & 0x1F);
 
 		out += 2;
 		
@@ -152,15 +158,17 @@ int _make_audio_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, in
 
 	uint32_t rtp_header;
 
-	rtp_header = htonl((2 << 30) | (1 << 23) | (ftl->audio_ptype << 16) | ftl->audio_sn);
+	struct media_component *media = &ftl->media[OBS_ENCODER_AUDIO];
+
+	rtp_header = htonl((2 << 30) | (1 << 23) | (media->payload_type << 16) | media->seq_num);
 	*((uint32_t*)out)++ = rtp_header;
-	rtp_header = htonl(ftl->audio_timestamp);
+	rtp_header = htonl(media->timestamp);
 	*((uint32_t*)out)++ = rtp_header;
-	rtp_header = htonl(ftl->audio_ssrc);
+	rtp_header = htonl(media->ssrc);
 	*((uint32_t*)out)++ = rtp_header;
 
-	ftl->audio_sn++;
-	ftl->audio_timestamp += ftl->audio_timestamp_step;
+	media->seq_num++;
+	media->timestamp += media->timestamp_step;
 
 	memcpy(out, in, payload_len);
 
@@ -169,14 +177,14 @@ int _make_audio_rtp_packet(ftl_t *ftl, uint8_t *in, int in_len, uint8_t *out, in
 	return in_len;
 }
 
-int _set_marker_bit(ftl_t *ftl, uint8_t *in) {
+int _set_marker_bit(ftl_t *ftl, enum obs_encoder_type type, uint8_t *in) {
 	uint32_t rtp_header;
 
 	rtp_header = ntohl(*((uint32_t*)in));
 	rtp_header |= 1 << 23; /*set marker bit*/
 	*((uint32_t*)in) = htonl(rtp_header);
 	
-	ftl->video_timestamp += ftl->video_timestamp_step;
+	ftl->media[type].timestamp += ftl->media[type].timestamp_step;
 
 	return 0;
 }
@@ -224,7 +232,12 @@ int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx, bool is_
 
 			while(remaining > 0) {
 
-				payload_size = _make_video_rtp_packet(ftl, p, remaining, ftl->pktBuf, &pkt_len, first_fu);
+				uint16_t sn = ftl->media[OBS_ENCODER_VIDEO].seq_num;
+				uint32_t ssrc = ftl->media[OBS_ENCODER_VIDEO].ssrc;
+				uint8_t *pkt_buf;
+				pkt_buf = _nack_get_empty_packet(ftl, ssrc, sn, &pkt_len);
+
+				payload_size = _make_video_rtp_packet(ftl, p, remaining, pkt_buf, &pkt_len, first_fu);
 
 				first_fu = 0;
 				remaining -= payload_size;
@@ -233,31 +246,152 @@ int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx, bool is_
 
 				/*if all data has been consumed set marker bit*/
 				if ((packet->size - consumed) == 0 && !is_header) {
-					_set_marker_bit(ftl, ftl->pktBuf);
+					_set_marker_bit(ftl, OBS_ENCODER_VIDEO, pkt_buf);
 				}
 
+/*
 				if (sendto(ftl->data_sock, ftl->pktBuf, pkt_len, 0, (struct sockaddr*) &ftl->server_addr, sizeof(ftl->server_addr)) == SOCKET_ERROR)
 				{
 					warn("sendto() failed with error code : %d", WSAGetLastError());
 				}
+*/
+				_nack_send_packet(ftl, ssrc, sn, pkt_len);
 			}
 		}
 
 	}
 	else if(packet->type == OBS_ENCODER_AUDIO) {
 		int pkt_len;
-		_make_audio_rtp_packet(ftl, packet->data, packet->size, ftl->pktBuf, &pkt_len);
+		uint16_t sn = ftl->media[OBS_ENCODER_VIDEO].seq_num;
+		uint32_t ssrc = ftl->media[OBS_ENCODER_VIDEO].ssrc;
+		uint8_t *pkt_buf;
 
+		pkt_buf = _nack_get_empty_packet(ftl, ssrc, sn, &pkt_len);
+
+		_make_audio_rtp_packet(ftl, packet->data, packet->size, pkt_buf, &pkt_len);
+
+		_nack_send_packet(ftl, ssrc, sn, pkt_len);
+/*
 		if (sendto(ftl->data_sock, ftl->pktBuf, pkt_len, 0, (struct sockaddr*) &ftl->server_addr, sizeof(ftl->server_addr)) == SOCKET_ERROR)
 		{
 			warn("sendto() failed with error code : %d", WSAGetLastError());
 		}
+*/
 	}
 	else {
 		warn("Got packet type %d\n", packet->type);
 	}
 
 	return 0;
+}
+
+int _nack_init(ftl_t *ftl, enum obs_encoder_type type) {
+
+	struct media_component *media = &ftl->media[type];
+
+	for (int i = 0; i < NACK_RB_SIZE; i++) {
+		if ((media->nack_slots[i] = (struct nack_slot *)malloc(sizeof(struct nack_slot))) == NULL) {
+			warn("Failed to allocate memory for nack buffer\n");
+			return -1;
+		}
+
+		struct nack_slot *slot = media->nack_slots[i];
+
+		if (pthread_mutex_init(&slot->mutex, NULL) != 0) {
+			warn("Failed to allocate memory for nack buffer\n");
+			return -1;
+		}
+
+		slot->len = 0;
+		slot->sn = -1;
+		slot->insert_ns = 0;
+	}
+
+	return 0;
+}
+
+struct media_component *_media_lookup(ftl_t *ftl, uint32_t ssrc) {
+	struct media_component *media = NULL;
+
+	for (int i = 0; i < sizeof(ftl->media) / sizeof(ftl->media[0]); i++) {
+		if (ftl->media[i].ssrc == ssrc) {
+			media = &ftl->media[i];
+			break;
+		}
+	}
+
+	return media;
+}
+
+uint8_t* _nack_get_empty_packet(ftl_t *ftl, uint32_t ssrc, uint16_t sn, int *buf_len) {
+	struct media_component *media;
+
+	if ( (media = _media_lookup(ftl, ssrc)) == NULL) {
+		warn("Unable to find ssrc %d\n", ssrc);
+		return NULL;
+	}
+
+	/*map sequence number to slot*/
+	struct nack_slot *slot = media->nack_slots[sn % NACK_RB_SIZE];
+
+	pthread_mutex_lock(&slot->mutex);
+
+	*buf_len = sizeof(slot->packet);
+	return slot->packet;	
+}
+
+int _nack_send_packet(ftl_t *ftl, uint32_t ssrc, uint16_t sn, int len) {
+	struct media_component *media;
+	int tx_len;
+
+	if ((media = _media_lookup(ftl, ssrc)) == NULL) {
+		warn("Unable to find ssrc %d\n", ssrc);
+		return -1;
+	}
+
+	/*map sequence number to slot*/
+	struct nack_slot *slot = media->nack_slots[sn % NACK_RB_SIZE];
+
+	slot->len = len;
+	slot->sn = sn;
+	slot->insert_ns = os_gettime_ns();
+
+	if ((tx_len = sendto(ftl->data_sock, slot->packet, slot->len, 0, (struct sockaddr*) &ftl->server_addr, sizeof(ftl->server_addr))) == SOCKET_ERROR)
+	{
+		warn("sendto() failed with error code : %d", WSAGetLastError());
+	}
+
+	pthread_mutex_unlock(&slot->mutex);
+
+	return tx_len;
+}
+
+int nack_resend_packet(ftl_t *ftl, uint32_t ssrc, uint16_t sn) {
+	struct media_component *media;
+	int tx_len;
+
+	if ((media = _media_lookup(ftl, ssrc)) == NULL) {
+		warn("Unable to find ssrc %d\n", ssrc);
+		return -1;
+	}
+
+	/*map sequence number to slot*/
+	struct nack_slot *slot = media->nack_slots[sn % NACK_RB_SIZE];
+
+	pthread_mutex_lock(&slot->mutex);
+
+	if (slot->sn != sn) {
+		warn("[%d] expected sn %d in slot but found %d...discarding retransmit request\n", ssrc, sn, slot->sn);
+		pthread_mutex_unlock(&slot->mutex);
+		return 0;
+	}
+
+	uint64_t req_delay = os_gettime_ns() - slot->insert_ns;
+
+	tx_len = _nack_send_packet(ftl, ssrc, sn, slot->len);
+	info("[%d] resent sn %d, request delay was %d ms\n", ssrc, sn, req_delay / 1000000);
+
+	return tx_len;
 }
 
 #if 0
@@ -283,13 +417,15 @@ return OBS_OUTPUT_SUCCESS;
 int FTL_LogSetCallback() {
 }
 
+
+
 static void *recv_thread(void *data)
 {
 	ftl_t *ftl = (ftl_t *)data;
 	int ret;
 	unsigned char *buf;
 
-	if ((buf = (unsigned char*)malloc(BUFLEN)) == NULL) {
+	if ((buf = (unsigned char*)malloc(MAX_PACKET_MTU)) == NULL) {
 		printf("Failed to allocate recv buffer\n");
 		return NULL;
 	}
@@ -300,7 +436,7 @@ static void *recv_thread(void *data)
 	while (1) {
 
 #ifdef _WIN32
-		ret = recv(ftl->data_sock, buf, BUFLEN, 0);
+		ret = recv(ftl->data_sock, buf, MAX_PACKET_MTU, 0);
 #else
 		ret = recv(stream->sb_socket, buf, bytes, 0);
 #endif
@@ -343,20 +479,18 @@ static void *recv_thread(void *data)
 			for (int fci = 0; fci < (length - 2); fci++) {
 				//request the first sequence number
 				snBase = ntohs(*p++);
-				info("[%d] nack request for sn %d\n", ssrcMedia, snBase);
+				nack_resend_packet(ftl, ssrcMedia, snBase);
 				blp = ntohs(*p++);
 				if (blp) {
 					for (int i = 0; i < 16; i++) {
 						if ((blp & (1 << i)) != 0) {
 							sn = snBase + i + 1;
-							info("[%d] nack request for sn %d\n", ssrcMedia, sn);
+							nack_resend_packet(ftl, ssrcMedia, sn);
 						}
 					}
 				}
 			}
 		}
-
-
 	}
 
 

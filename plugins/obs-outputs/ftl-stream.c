@@ -659,10 +659,10 @@ static int try_connect(struct ftl_stream *stream)
 		struct media_frames_per_second *fps, const char **option);
 */
 	FTL_init_data(&(stream->ftl), stream->path.array);
-	FTL_set_video_ptype(&stream->ftl, 96);
-	FTL_set_audio_ptype(&stream->ftl, 97);
-	FTL_set_video_ssrc(&stream->ftl, stream->video_ssrc);
-	FTL_set_audio_ssrc(&stream->ftl, stream->audio_ssrc);
+	FTL_set_ptype(&stream->ftl, OBS_ENCODER_VIDEO, 96);
+	FTL_set_ptype(&stream->ftl, OBS_ENCODER_AUDIO, 97);
+	FTL_set_ssrc(&stream->ftl, OBS_ENCODER_VIDEO, stream->video_ssrc);
+	FTL_set_ssrc(&stream->ftl, OBS_ENCODER_AUDIO, stream->audio_ssrc);
 
 /*
 	memset(&stream->rtmp.Link, 0, sizeof(stream->rtmp.Link));

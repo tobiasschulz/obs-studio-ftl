@@ -50,7 +50,7 @@ FTL_API extern const int FTL_VERSION_MAJOR;
 FTL_API extern const int FTL_VERSION_MINOR;
 FTL_API extern const int FTL_VERSION_MAINTENANCE;
 
-#define BUFLEN 1500  //Max length of buffer
+#define MAX_PACKET_MTU 1500  //Max length of buffer
 #define FTL_UDP_DATA_PORT 8082   //The port on which to listen for incoming data
 #define RTP_HEADER_BASE_LEN 12
 #define RTP_FUA_HEADER_LEN 2
@@ -144,23 +144,39 @@ typedef struct {
  * \ingroup ftl_public
  */
 
+#define NACK_RB_SIZE 1024
+#define NACK_RTT_AVG_SECONDS 5
+
+struct nack_slot {
+	uint8_t packet[MAX_PACKET_MTU];
+	int len;
+	uint64_t insert_ns;
+	int sn;
+	pthread_mutex_t mutex;
+};
+
+struct media_component {
+	uint32_t ssrc;
+	uint32_t timestamp;
+	uint32_t timestamp_step;
+	uint8_t payload_type;
+	uint16_t seq_num;
+	uint8_t fua_nalu_type;
+	//	pthread_mutex_t  packets_mutex;
+	os_sem_t         *send_sem;
+	int64_t min_nack_rtt;
+	int64_t max_nack_rtt;
+	int64_t nack_rtt_avg;
+	bool nack_slots_initalized;
+	struct nack_slot *nack_slots[NACK_RB_SIZE];
+};
+
 typedef struct {
 	pthread_t recv_thread;
+	int max_mtu;
 	SOCKET data_sock;
 	struct sockaddr_in server_addr;
-	int max_mtu;
-	uint8_t *pktBuf;
-	uint32_t video_timestamp;
-	uint32_t video_timestamp_step;
-	uint32_t audio_timestamp;
-	uint32_t audio_timestamp_step;
-	uint32_t video_ssrc;
-	uint32_t audio_ssrc;
-	uint8_t video_ptype;
-	uint8_t audio_ptype;
-	uint16_t video_sn;
-	uint16_t audio_sn;
-	uint8_t current_nalu_type;
+	struct media_component media[2];
 } ftl_t;
 
 typedef void (*ftl_logging_function_t)(ftl_log_severity_t log_level, const char * log_message);
@@ -337,10 +353,8 @@ FTL_API void ftl_register_log_handler(ftl_logging_function_t log_func);
 
 int FTL_init_data(ftl_t *ftl, char *ingest);
 int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx, bool is_header);
-int FTL_set_video_ptype(ftl_t *ftl, uint8_t p_type);
-int FTL_set_audio_ptype(ftl_t *ftl, uint8_t p_type);
-int FTL_set_video_ssrc(ftl_t *ftl, uint32_t ssrc);
-int FTL_set_audio_ssrc(ftl_t *ftl, uint32_t ssrc);
+int FTL_set_ptype(ftl_t *ftl, enum obs_encoder_type type, uint8_t p_type);
+int FTL_set_ssrc(ftl_t *ftl, enum obs_encoder_type type, uint32_t ssrc);
 
 // Load the internal API if necessary
 #ifdef __FTL_INTERNAL
