@@ -304,10 +304,59 @@ static void *recv_thread(void *data)
 #else
 		ret = recv(stream->sb_socket, buf, bytes, 0);
 #endif
-
-		if (ret > 0) {
-			info("Got recv of size %d bytes\n", ret);
+		if (ret <= 0) {
+			continue;
 		}
+
+		info("Got recv of size %d bytes\n", ret);
+
+		int version, padding, feedbackType, ptype, length, ssrcSender, ssrcMedia;
+		uint16_t snBase, blp, sn;
+		int recv_len = ret;
+
+		if (recv_len < 2) {
+			warn("recv packet too small to parse, discarding\n");
+			continue;
+		}
+
+		/*extract rtp header*/
+		version = (buf[0] >> 6) & 0x3;
+		padding = (buf[0] >> 5) & 0x1;
+		feedbackType = buf[0] & 0x1F;
+		ptype = buf[1];
+
+		if (feedbackType == 1 && ptype == 205) {
+			info("Got NACK retransmit request\n");
+
+			length = ntohs(*((uint16_t*)(buf + 2)));
+
+			if (recv_len < ((length+1) * 4)) {
+				warn("reported len was %d but packet is only %d...discarding\n", recv_len, ((length + 1) * 4));
+				continue;
+			}
+
+			ssrcSender = ntohl(*((uint32_t*)(buf+4)));
+			ssrcMedia = ntohl(*((uint32_t*)(buf+8)));
+
+			uint16_t *p = (uint16_t *)(buf + 12);
+
+			for (int fci = 0; fci < (length - 2); fci++) {
+				//request the first sequence number
+				snBase = ntohs(*p++);
+				info("[%d] nack request for sn %d\n", ssrcMedia, snBase);
+				blp = ntohs(*p++);
+				if (blp) {
+					for (int i = 0; i < 16; i++) {
+						if ((blp & (1 << i)) != 0) {
+							sn = snBase + i + 1;
+							info("[%d] nack request for sn %d\n", ssrcMedia, sn);
+						}
+					}
+				}
+			}
+		}
+
+
 	}
 
 
