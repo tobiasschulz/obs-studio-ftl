@@ -262,8 +262,8 @@ int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx, bool is_
 	}
 	else if(packet->type == OBS_ENCODER_AUDIO) {
 		int pkt_len;
-		uint16_t sn = ftl->media[OBS_ENCODER_VIDEO].seq_num;
-		uint32_t ssrc = ftl->media[OBS_ENCODER_VIDEO].ssrc;
+		uint16_t sn = ftl->media[OBS_ENCODER_AUDIO].seq_num;
+		uint32_t ssrc = ftl->media[OBS_ENCODER_AUDIO].ssrc;
 		uint8_t *pkt_buf;
 
 		pkt_buf = _nack_get_empty_packet(ftl, ssrc, sn, &pkt_len);
