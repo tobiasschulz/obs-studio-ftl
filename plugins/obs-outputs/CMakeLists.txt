@@ -47,7 +47,7 @@ if(WIN32)
 		libftl/ftl.c
 		libftl/stream_configuration.c
 		libftl/logging.c
-		libftl/posix/socket.c
+		libftl/win32/socket.c
 		libftl/hmac/hmac.c
 		libftl/hmac/sha2.c
 		libftl/charon_protocol.c)	
@@ -59,6 +59,7 @@ else()
 		libftl/init.c
 		libftl/stream_configuration.c
 		libftl/logging.c
+		libftl/posix/socket.c
 		libftl/hmac/hmac.c
 		libftl/hmac/sha2.c
 		libftl/charon_protocol.c)	

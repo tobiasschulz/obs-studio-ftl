@@ -39,7 +39,11 @@ ftl_status_t ftl_activate_stream(ftl_stream_configuration_t *stream_config) {
 
   /* First things first, resolve ingest IP address */
   int err = 0;
+#ifdef _WIN32
+  SOCKET sock = 0;
+#else
   int sock = 0;
+#endif
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
 

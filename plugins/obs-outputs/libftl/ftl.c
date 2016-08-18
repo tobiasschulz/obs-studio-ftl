@@ -14,12 +14,14 @@ uint8_t* _nack_get_empty_packet(ftl_t *ftl, uint32_t ssrc, uint16_t sn, int *buf
 int _nack_send_packet(ftl_t *ftl, uint32_t ssrc, uint16_t sn, int len);
 int nack_resend_packet(ftl_t *ftl, uint32_t ssrc, uint16_t sn);
 struct media_component *_media_lookup(ftl_t *ftl, uint32_t ssrc);
+int _nack_destroy(ftl_t *ftl, enum obs_encoder_type type);
 
-int FTL_init_data(ftl_t *ftl, char *ingest) {
+int FTL_init_media_chans(ftl_t *ftl, char *ingest) {
 	WSADATA wsa;
 	int ret;
 	struct hostent *server;
 	
+#ifdef _WIN32
 	//Initialise winsock
 	printf("Initialising Winsock...");
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
@@ -28,6 +30,7 @@ int FTL_init_data(ftl_t *ftl, char *ingest) {
 		return EXIT_FAILURE;
 	}
 	printf("Initialised\n");
+#endif
 
 	//Create a socket
 	if ((ftl->data_sock = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET)
@@ -45,14 +48,8 @@ int FTL_init_data(ftl_t *ftl, char *ingest) {
 	ftl->server_addr.sin_family = AF_INET;
 	memcpy((char *)&ftl->server_addr.sin_addr.s_addr, (char *)server->h_addr, server->h_length);
 	ftl->server_addr.sin_port = htons(FTL_UDP_DATA_PORT);
-/*
-	if (bind(ftl->data_sock, (struct sockaddr *)&ftl->server_addr, sizeof(ftl->server_addr)) == SOCKET_ERROR)
-	{
-		printf("Bind failed with error code : %d", WSAGetLastError());
-		exit(EXIT_FAILURE);
-	}
-	puts("Bind done");
-	*/
+
+	ftl->recv_thread_running = true;
 
 	ret = pthread_create(&ftl->recv_thread, NULL, recv_thread, ftl);
 	if (ret != 0) {
@@ -79,6 +76,26 @@ int FTL_init_data(ftl_t *ftl, char *ingest) {
 		}
 	}
 
+	return 0;
+}
+
+int FTL_destroy_media_chans(ftl_t *ftl) {
+
+
+	for (int i = 0; i < sizeof(ftl->media) / sizeof(ftl->media[0]); i++) {
+		_nack_destroy(ftl, i);
+	}
+
+	ftl->recv_thread_running = false;
+
+#ifdef _WIN32
+	closesocket(ftl->data_sock);
+#else
+	close(ftl->data_sock);
+#endif
+
+	pthread_join(ftl->recv_thread, NULL);
+	
 	return 0;
 }
 
@@ -222,8 +239,6 @@ int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx, bool is_
 				p += 4;
 			}
 
-			//info("Got Video Packet of type %d size %d (%02X %02X %02X %02X %02X %02X %02X %02X)\n", p[0] & 0x1F, len, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
-
 			int pkt_len;
 			int payload_size;
 
@@ -249,12 +264,6 @@ int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx, bool is_
 					_set_marker_bit(ftl, OBS_ENCODER_VIDEO, pkt_buf);
 				}
 
-/*
-				if (sendto(ftl->data_sock, ftl->pktBuf, pkt_len, 0, (struct sockaddr*) &ftl->server_addr, sizeof(ftl->server_addr)) == SOCKET_ERROR)
-				{
-					warn("sendto() failed with error code : %d", WSAGetLastError());
-				}
-*/
 				_nack_send_packet(ftl, ssrc, sn, pkt_len);
 			}
 		}
@@ -271,12 +280,7 @@ int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx, bool is_
 		_make_audio_rtp_packet(ftl, packet->data, packet->size, pkt_buf, &pkt_len);
 
 		_nack_send_packet(ftl, ssrc, sn, pkt_len);
-/*
-		if (sendto(ftl->data_sock, ftl->pktBuf, pkt_len, 0, (struct sockaddr*) &ftl->server_addr, sizeof(ftl->server_addr)) == SOCKET_ERROR)
-		{
-			warn("sendto() failed with error code : %d", WSAGetLastError());
-		}
-*/
+
 	}
 	else {
 		warn("Got packet type %d\n", packet->type);
@@ -305,6 +309,21 @@ int _nack_init(ftl_t *ftl, enum obs_encoder_type type) {
 		slot->len = 0;
 		slot->sn = -1;
 		slot->insert_ns = 0;
+	}
+
+	return 0;
+}
+
+int _nack_destroy(ftl_t *ftl, enum obs_encoder_type type) {
+
+	struct media_component *media = &ftl->media[type];
+
+	for (int i = 0; i < NACK_RB_SIZE; i++) {
+		if (media->nack_slots[i] != NULL) {
+			pthread_mutex_destroy(&media->nack_slots[i]->mutex);
+			free(media->nack_slots[i]);
+			media->nack_slots[i] = NULL;
+		}
 	}
 
 	return 0;
@@ -394,26 +413,6 @@ int nack_resend_packet(ftl_t *ftl, uint32_t ssrc, uint16_t sn) {
 	return tx_len;
 }
 
-#if 0
-ret = pthread_create(&ftl->recv_thread, NULL, send_thread, stream);
-if (ret != 0) {
-	RTMP_Close(&stream->rtmp);
-	warn("Failed to create send thread");
-	return OBS_OUTPUT_ERROR;
-}
-
-os_atomic_set_bool(&stream->active, true);
-while (next) {
-	if (!send_meta_data(stream, idx++, &next)) {
-		warn("Disconnected while attempting to connect to "
-			"server.");
-		return OBS_OUTPUT_DISCONNECTED;
-	}
-}
-obs_output_begin_data_capture(stream->output, 0);
-
-return OBS_OUTPUT_SUCCESS;
-#endif
 int FTL_LogSetCallback() {
 }
 
@@ -430,15 +429,27 @@ static void *recv_thread(void *data)
 		return NULL;
 	}
 
+#if 0
+#ifdef _WIN32
+	ret = ioctlsocket(stream->sb_socket, FIONREAD,
+		(u_long*)&recv_size);
+#else
+	ret = ioctl(stream->sb_socket, FIONREAD, &recv_size);
+#endif
 
+	if (ret >= 0 && recv_size > 0) {
+		if (!discard_recv_data(stream, (size_t)recv_size))
+			return -1;
+	}
+#endif
 	//os_set_thread_name("ftl-stream: recv_thread");
 
-	while (1) {
-
+	while (ftl->recv_thread_running) {
+		
 #ifdef _WIN32
 		ret = recv(ftl->data_sock, buf, MAX_PACKET_MTU, 0);
 #else
-		ret = recv(stream->sb_socket, buf, bytes, 0);
+		ret = recv(stream->sb_socket, buf, MAX_PACKET_MTU, 0);
 #endif
 		if (ret <= 0) {
 			continue;
@@ -493,63 +504,7 @@ static void *recv_thread(void *data)
 		}
 	}
 
+	info("Exited Recv Thread\n");
 
-#if 0
-
-	while (os_sem_wait(stream->send_sem) == 0) {
-		struct encoder_packet packet;
-
-		if (stopping(stream) && stream->stop_ts == 0) {
-			break;
-		}
-
-		if (!get_next_packet(stream, &packet))
-			continue;
-
-		if (stopping(stream)) {
-			if (packet.sys_dts_usec >= (int64_t)stream->stop_ts) {
-				obs_free_encoder_packet(&packet);
-				break;
-			}
-		}
-
-		/*
-		if (!stream->sent_headers) {
-		if (!send_headers(stream)) {
-		os_atomic_set_bool(&stream->disconnected, true);
-		break;
-		}
-		}
-		*/
-
-		if (send_packet(stream, &packet, false, packet.track_idx) < 0) {
-			os_atomic_set_bool(&stream->disconnected, true);
-			break;
-		}
-	}
-
-	if (disconnected(stream)) {
-		info("Disconnected from %s", stream->path.array);
-	}
-	else {
-		info("User stopped the stream");
-	}
-
-	//RTMP_Close(&stream->rtmp);
-
-	if (!stopping(stream)) {
-		pthread_detach(stream->send_thread);
-		obs_output_signal_stop(stream->output, OBS_OUTPUT_DISCONNECTED);
-	}
-	else {
-		obs_output_end_data_capture(stream->output);
-	}
-
-	free_packets(stream);
-	os_event_reset(stream->stop_event);
-	os_atomic_set_bool(&stream->active, false);
-	stream->sent_headers = false;
-	return NULL;
-
-#endif
+	return 0;
 }

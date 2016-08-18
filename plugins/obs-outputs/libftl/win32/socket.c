@@ -23,14 +23,14 @@
 **/
 
 #define __FTL_INTERNAL
-#include "ftl.h"
+#include "../ftl.h"
 
 void ftl_init_sockets() {
   WSADATA wsaData;
   WSAStartup(MAKEWORD(2, 2), &wsaData);
 }
 
-int ftl_close_socket(int sock) {
+int ftl_close_socket(SOCKET sock) {
   return closesocket(sock);
 }
 

@@ -176,6 +176,9 @@ static void ftl_stream_destroy(void *data)
 		}
 	}
 
+	ftl_destory_stream(&(stream->stream_config));
+	FTL_destroy_media_chans(&stream->ftl);
+
 	if (stream) {
 		free_packets(stream);
 		dstr_free(&stream->path);
@@ -281,46 +284,6 @@ static inline bool get_next_packet(struct ftl_stream *stream,
 	return new_packet;
 }
 
-
-static bool discard_recv_data(struct ftl_stream *stream, size_t size)
-{
-//	RTMP *rtmp = &stream->rtmp;
-	uint8_t buf[512];
-#ifdef _WIN32
-	int ret;
-#else
-	ssize_t ret;
-#endif
-
-	do {
-		size_t bytes = size > 512 ? 512 : size;
-		size -= bytes;
-
-#ifdef _WIN32
-		ret = recv(stream->sb_socket, buf, (int)bytes, 0);
-#else
-		ret = recv(stream->sb_socket, buf, bytes, 0);
-#endif
-
-		if (ret <= 0) {
-#ifdef _WIN32
-			int error = WSAGetLastError();
-#else
-			int error = errno;
-#endif
-			if (ret < 0) {
-				do_log(LOG_ERROR, "recv error: %d (%d bytes)",
-						error, (int)size);
-			}
-			return false;
-		}
-	} while (size > 0);
-
-	return true;
-}
-
-
-
 static int send_packet(struct ftl_stream *stream,
 		struct encoder_packet *packet, bool is_header, size_t idx)
 {
@@ -328,31 +291,12 @@ static int send_packet(struct ftl_stream *stream,
 	size_t  size;
 	int     recv_size = 0;
 	int     ret = 0;
-#if 0
-#ifdef _WIN32
-	ret = ioctlsocket(stream->sb_socket, FIONREAD,
-			(u_long*)&recv_size);
-#else
-	ret = ioctl(stream->sb_socket, FIONREAD, &recv_size);
-#endif
 
-	if (ret >= 0 && recv_size > 0) {
-		if (!discard_recv_data(stream, (size_t)recv_size))
-			return -1;
-	}
-#endif
 	flv_packet_mux(packet, &data, &size, is_header);
 #ifdef TEST_FRAMEDROPS
 	os_sleep_ms(rand() % 40);
 #endif
-	//ret = RTMP_Write(&stream->rtmp, (char*)data, (int)size, (int)idx);
 	ret = FTL_sendPackets(&stream->ftl, packet, (int)idx, is_header);
-	/*
-	info("ftl data: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
-		data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
-		data[16], data[17], data[18], data[19], data[20], data[21], data[22], data[23], data[24], data[25], data[26], data[27], data[28], data[29], data[30], data[31]);
-		*/
-	//bfree(data);
 
 	obs_free_encoder_packet(packet);
 
@@ -405,14 +349,16 @@ static void *send_thread(void *data)
 		info("User stopped the stream");
 	}
 
-	//RTMP_Close(&stream->rtmp);
-
 	if (!stopping(stream)) {
 		pthread_detach(stream->send_thread);
 		obs_output_signal_stop(stream->output, OBS_OUTPUT_DISCONNECTED);
 	} else {
 		obs_output_end_data_capture(stream->output);
 	}
+
+	ftl_deactivate_stream(stream->stream_config);
+
+//	stream->stream_config = 0; /* FTL requires the pointer be 0ed out */
 
 	free_packets(stream);
 	os_event_reset(stream->stop_event);
@@ -658,7 +604,7 @@ static int try_connect(struct ftl_stream *stream)
 		const char *name,
 		struct media_frames_per_second *fps, const char **option);
 */
-	FTL_init_data(&(stream->ftl), stream->path.array);
+	FTL_init_media_chans(&(stream->ftl), stream->path.array);
 	FTL_set_ptype(&stream->ftl, OBS_ENCODER_VIDEO, 96);
 	FTL_set_ptype(&stream->ftl, OBS_ENCODER_AUDIO, 97);
 	FTL_set_ssrc(&stream->ftl, OBS_ENCODER_VIDEO, stream->video_ssrc);

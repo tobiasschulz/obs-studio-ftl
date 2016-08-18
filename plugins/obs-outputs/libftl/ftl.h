@@ -173,6 +173,7 @@ struct media_component {
 
 typedef struct {
 	pthread_t recv_thread;
+	bool recv_thread_running;
 	int max_mtu;
 	SOCKET data_sock;
 	struct sockaddr_in server_addr;
@@ -351,7 +352,8 @@ FTL_API void ftl_destory_stream(ftl_stream_configuration_t** stream_config);
 
 FTL_API void ftl_register_log_handler(ftl_logging_function_t log_func);
 
-int FTL_init_data(ftl_t *ftl, char *ingest);
+int FTL_init_media_chans(ftl_t *ftl, char *ingest);
+int FTL_destroy_media_chans(ftl_t *ftl);
 int FTL_sendPackets(ftl_t *ftl, struct encoder_packet *packet, int idx, bool is_header);
 int FTL_set_ptype(ftl_t *ftl, enum obs_encoder_type type, uint8_t p_type);
 int FTL_set_ssrc(ftl_t *ftl, enum obs_encoder_type type, uint32_t ssrc);

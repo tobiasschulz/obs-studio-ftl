@@ -89,7 +89,10 @@ void ftl_destory_stream(ftl_stream_configuration_t** stream_config) {
   }
 
   ftl_stream_configuration_private_t* config = (ftl_stream_configuration_private_t*)(*stream_config)->private;
-  if (config->ingest_location) free(config->ingest_location);
+  if (config->ingest_location) {
+	  config->ingest_location = NULL;
+	  free(config->ingest_location);
+  }
   if (config->authetication_key) free(config->authetication_key);
 
   // Free the audio component if present
