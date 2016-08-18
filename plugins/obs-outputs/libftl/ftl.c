@@ -455,8 +455,6 @@ static void *recv_thread(void *data)
 			continue;
 		}
 
-		info("Got recv of size %d bytes\n", ret);
-
 		int version, padding, feedbackType, ptype, length, ssrcSender, ssrcMedia;
 		uint16_t snBase, blp, sn;
 		int recv_len = ret;
@@ -473,7 +471,6 @@ static void *recv_thread(void *data)
 		ptype = buf[1];
 
 		if (feedbackType == 1 && ptype == 205) {
-			info("Got NACK retransmit request\n");
 
 			length = ntohs(*((uint16_t*)(buf + 2)));
 
