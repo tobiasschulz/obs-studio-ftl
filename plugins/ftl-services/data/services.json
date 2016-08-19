@@ -220,15 +220,15 @@
                 {
                     "type": "rtmp"
                 }
-            ],
-            "recommended": {
-                "keyint": 2,
-                "profile": "baseline",
-                "max video bitrate": 3000,
-                "max audio bitrate": 160,
-                "audio sample rate": 48000,
-                "x264opts": "scenecut=0"
-            }
+            ]
         }
-    ]
+    ],
+    "recommended": {
+        "keyint": 2,
+        "profile": "baseline",
+        "max video bitrate": 3000,
+        "max audio bitrate": 160,
+        "audio sample rate": 48000,
+        "x264opts": "scenecut=0"
+    }
 }
