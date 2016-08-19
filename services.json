@@ -1,6 +1,6 @@
 {
     "format_version": 1,
-    "services": [
+    "ingests": [
 {
 "name": "US: Dallas, TX",
 "host": "ingest-dal.beam.pro",
@@ -224,3 +224,4 @@
 ]
 }
 ]
+}
