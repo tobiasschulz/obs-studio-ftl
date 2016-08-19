@@ -4,6 +4,8 @@
 #include <jansson.h>
 
 static void fill_servers(obs_property_t *servers_prop, json_t *service, const char *name);
+static void initialize_output(json_t *root,
+	obs_data_t *video_settings, obs_data_t *audio_settings);
 
 struct ftl_beam {
 	char *server, *key;
@@ -135,103 +137,119 @@ static const char *ftl_beam_key(void *data)
 	return service->key;
 }
 
+static json_t *open_services_file(void)
+{
+	char *file;
+	json_t *root = NULL;
+
+	file = obs_module_config_path("services.json");
+	if (file) {
+		root = open_json_file(file);
+		bfree(file);
+	}
+
+	if (!root) {
+		file = obs_module_file("services.json");
+		if (file) {
+			root = open_json_file(file);
+			bfree(file);
+		}
+	}
+
+	return root;
+}
+
 static void ftl_beam_apply_settings(void *data,
 		obs_data_t *video_settings, obs_data_t *audio_settings)
 {
 	struct ftl_beam *service = data;
-	/*
+
 	json_t             *root = open_services_file();
 
 	if (root) {
-		initialize_output(service, root, video_settings,
+		initialize_output(root, video_settings,
 				audio_settings);
 		json_decref(root);
 	}
-	*/
 }
-/*
-static void add_service(obs_property_t *list, json_t *service, bool show_all,
-	const char *cur_service)
+
+static void apply_video_encoder_settings(obs_data_t *settings,
+	json_t *recommended)
 {
-	json_t *servers;
-	const char *name;
-	bool common;
-
-	if (!json_is_object(service)) {
-		blog(LOG_WARNING, "rtmp-common.c: [add_service] service "
-			"is not an object");
-		return;
+	json_t *item = json_object_get(recommended, "keyint");
+	if (item && json_is_integer(item)) {
+		int keyint = (int)json_integer_value(item);
+		obs_data_set_int(settings, "keyint_sec", keyint);
 	}
 
-	name = get_string_val(service, "name");
-	if (!name) {
-		blog(LOG_WARNING, "rtmp-common.c: [add_service] service "
-			"has no name");
-		return;
+	obs_data_set_string(settings, "rate_control", "CBR");
+
+	item = json_object_get(recommended, "profile");
+	if (item && json_is_string(item)) {
+		const char *profile = json_string_value(item);
+		obs_data_set_string(settings, "profile", profile);
 	}
 
-	common = get_bool_val(service, "common");
-	if (!show_all && !common && strcmp(cur_service, name) != 0) {
-		return;
+	item = json_object_get(recommended, "max video bitrate");
+	if (item && json_is_integer(item)) {
+		int max_bitrate = (int)json_integer_value(item);
+		if (obs_data_get_int(settings, "bitrate") > max_bitrate) {
+			obs_data_set_int(settings, "bitrate", max_bitrate);
+			obs_data_set_int(settings, "buffer_size", max_bitrate);
+		}
 	}
 
-	servers = json_object_get(service, "servers");
-	if (!servers || !json_is_array(servers)) {
-		blog(LOG_WARNING, "rtmp-common.c: [add_service] service "
-			"'%s' has no servers", name);
-		return;
-	}
+	item = json_object_get(recommended, "x264opts");
+	if (item && json_is_string(item)) {
+		const char *x264_settings = json_string_value(item);
+		const char *cur_settings =
+			obs_data_get_string(settings, "x264opts");
+		struct dstr opts;
 
-	obs_property_list_add_string(list, name, name);
+		dstr_init_copy(&opts, cur_settings);
+		if (!dstr_is_empty(&opts))
+			dstr_cat(&opts, " ");
+		dstr_cat(&opts, x264_settings);
+
+		obs_data_set_string(settings, "x264opts", opts.array);
+		dstr_free(&opts);
+	}
 }
 
-static bool service_selected(obs_properties_t *props, obs_property_t *p,
-obs_data_t *settings)
+static void apply_audio_encoder_settings(obs_data_t *settings,
+	json_t *recommended)
 {
-const char *name = obs_data_get_string(settings, "service");
-json_t *root     = obs_properties_get_param(props);
-json_t *service;
+	json_t *item;
 
-if (!name || !*name)
-return false;
+	item = json_object_get(recommended, "max audio bitrate");
+	if (item && json_is_integer(item)) {
+		int max_bitrate = (int)json_integer_value(item);
+		if (obs_data_get_int(settings, "bitrate") > max_bitrate)
+			obs_data_set_int(settings, "bitrate", max_bitrate);
+	}
 
-service = find_service(root, name);
-if (!service)
-return false;
-
-fill_servers(obs_properties_get(props, "server"), service, name);
-
-UNUSED_PARAMETER(p);
-return true;
+	item = json_object_get(recommended, "audio sample rate");
+	if (item && json_is_integer(item)) {
+		int sample_rate = (int)json_integer_value(item);
+		if (obs_data_get_int(settings, "sample_rate") != sample_rate)
+			obs_data_set_int(settings, "sample_rate", sample_rate);
+	}
 }
 
-static void fill_servers(obs_property_t *servers_prop, json_t *service, const char *name)
+static void initialize_output(json_t *root,
+	obs_data_t *video_settings, obs_data_t *audio_settings)
 {
-	json_t *servers, *server;
-	size_t index;
+	json_t        *recommended;
 
-	obs_property_list_clear(servers_prop);
-
-	servers = json_object_get(service, "servers");
-
-	if (!json_is_array(servers)) {
-		blog(LOG_WARNING, "rtmp-common.c: [fill_servers] "
-		"Servers for service '%s' not a valid object",
-		name);
+	recommended = json_object_get(root, "recommended");
+	if (!recommended)
 		return;
-	}
 
-	json_array_foreach (servers, index, server) {
-		const char *server_name = get_string_val(server, "name");
-		const char *url         = get_string_val(server, "url");
-
-		if (!server_name || !url)
-			continue;
-
-		obs_property_list_add_string(servers_prop, server_name, url);
-	}
+	if (video_settings)
+		apply_video_encoder_settings(video_settings, recommended);
+	if (audio_settings)
+		apply_audio_encoder_settings(audio_settings, recommended);
 }
-*/
 
 static inline const char *get_string_val(json_t *service, const char *key)
 {
