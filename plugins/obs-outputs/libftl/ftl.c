@@ -86,15 +86,17 @@ int FTL_destroy_media_chans(ftl_t *ftl) {
 		_nack_destroy(ftl, i);
 	}
 
-	ftl->recv_thread_running = false;
+	if (ftl->recv_thread_running) {
+		ftl->recv_thread_running = false;
 
 #ifdef _WIN32
-	closesocket(ftl->data_sock);
+		closesocket(ftl->data_sock);
 #else
-	close(ftl->data_sock);
+		close(ftl->data_sock);
 #endif
 
-	pthread_join(ftl->recv_thread, NULL);
+		pthread_join(ftl->recv_thread, NULL);
+	}
 	
 	return 0;
 }
