@@ -68,7 +68,7 @@ struct ftl_stream {
 	os_event_t       *stop_event;
 	uint64_t         stop_ts;
 
-	struct dstr      path, key;
+	struct dstr      path, path_ip, key;
 	uint32_t         channel_id;
 	struct dstr      username, password;
 	struct dstr      encoder_name;
@@ -182,6 +182,7 @@ static void ftl_stream_destroy(void *data)
 	if (stream) {
 		free_packets(stream);
 		dstr_free(&stream->path);
+		dstr_free(&stream->path_ip);
 		dstr_free(&stream->key);
 		dstr_free(&stream->username);
 		dstr_free(&stream->password);
@@ -344,7 +345,7 @@ static void *send_thread(void *data)
 	}
 
 	if (disconnected(stream)) {
-		info("Disconnected from %s", stream->path.array);
+		info("Disconnected from %s (%s)", stream->path.array, stream->path_ip.array);
 	} else {
 		info("User stopped the stream");
 	}
@@ -567,18 +568,46 @@ static void win32_log_interface_type(struct ftl_stream *stream)
 */
 #endif
 
+static int lookup_ingest_ip(const char *ingest_location, char *ingest_ip) {
+	struct hostent *remoteHost;
+	struct in_addr addr;
+	int retval = -1;
+	ingest_ip[0] = '\0';
+
+	remoteHost = gethostbyname(ingest_location);
+
+	if (remoteHost) {
+		int i = 0;
+		if (remoteHost->h_addrtype == AF_INET)
+		{
+			while (remoteHost->h_addr_list[i] != 0) {
+				addr.s_addr = *(u_long *)remoteHost->h_addr_list[i++];
+				blog(LOG_INFO, "IP Address #%d of ingest is: %s\n", i, inet_ntoa(addr));
+
+				/*only use the first ip found*/
+				if (strlen(ingest_ip) == 0) {
+					strcpy(ingest_ip, inet_ntoa(addr));
+					retval = 0;
+				}
+			}
+		}
+	}
+
+	return retval;
+}
+
 static int try_connect(struct ftl_stream *stream)
 {
 	ftl_status_t status_code;
 	
-	if (dstr_is_empty(&stream->path)) {
+	if (dstr_is_empty(&stream->path_ip)) {
 		warn("URL is empty");
 		return OBS_OUTPUT_BAD_PATH;
 	}
 
-	info("Connecting to FTL Ingest URL %s...", stream->path.array);
+	info("Connecting to FTL Ingest URL %s (%s)...", stream->path.array, stream->path_ip.array);
 
-	ftl_set_ingest_location(stream->stream_config, stream->path.array);
+	ftl_set_ingest_location(stream->stream_config, stream->path_ip.array);
 	ftl_set_authetication_key(stream->stream_config, stream->channel_id, stream->key.array);	
 
 	stream->video_component = ftl_create_video_component(FTL_VIDEO_H264, 96, stream->video_ssrc, stream->scale_width, stream->scale_height);
@@ -604,7 +633,7 @@ static int try_connect(struct ftl_stream *stream)
 		const char *name,
 		struct media_frames_per_second *fps, const char **option);
 */
-	FTL_init_media_chans(&(stream->ftl), stream->path.array);
+	FTL_init_media_chans(&(stream->ftl), stream->path_ip.array);
 	FTL_set_ptype(&stream->ftl, OBS_ENCODER_VIDEO, 96);
 	FTL_set_ptype(&stream->ftl, OBS_ENCODER_AUDIO, 97);
 	FTL_set_ssrc(&stream->ftl, OBS_ENCODER_VIDEO, stream->video_ssrc);
@@ -677,7 +706,7 @@ static int try_connect(struct ftl_stream *stream)
 		return OBS_OUTPUT_INVALID_STREAM;
 */
 
-	info("Connection to %s successful", stream->path.array);
+	info("Connection to %s (%s) successful", stream->path.array, stream->path_ip.array);
 
 	return init_send(stream);
 }
@@ -912,7 +941,7 @@ static void *connect_thread(void *data)
 
 	if (ret != OBS_OUTPUT_SUCCESS) {
 		obs_output_signal_stop(stream->output, ret);
-		info("Connection to %s failed: %d", stream->path.array, ret);
+		info("Connection to %s (%s) failed: %d", stream->path.array, stream->path_ip.array, ret);
 	}
 
 	if (!stopping(stream))
@@ -934,6 +963,7 @@ static bool init_connect(struct ftl_stream *stream)
 	obs_data_t *settings;
 	const char *bind_ip, *key;
 	char stream_key[50];
+	char tmp_ip[20];
 
 	info("init_connect\n");
 
@@ -954,6 +984,8 @@ static bool init_connect(struct ftl_stream *stream)
 
 	settings = obs_output_get_settings(stream->output);
 	dstr_copy(&stream->path,     obs_service_get_url(service));
+	lookup_ingest_ip(stream->path.array, tmp_ip);
+	dstr_copy(&stream->path_ip, tmp_ip);
 	key = obs_service_get_key(service);
 
 	info("Key is %s\n", key);
