@@ -87,7 +87,7 @@ struct ftl_stream {
 //	RTMP             rtmp;
 	ftl_t            ftl;
 	SOCKET           sb_socket;
-	uint32_t         audio_ssrc, video_ssrc, scale_width, scale_height;
+	uint32_t         audio_ssrc, video_ssrc, scale_width, scale_height, width, height;
 	ftl_stream_configuration_t* stream_config;
 	ftl_stream_video_component_t* video_component;
 	ftl_stream_audio_component_t* audio_component;
@@ -607,10 +607,14 @@ static int try_connect(struct ftl_stream *stream)
 
 	info("Connecting to FTL Ingest URL %s (%s)...", stream->path.array, stream->path_ip.array);
 
+	stream->width = (int)obs_output_get_width(stream->output);
+	stream->height = (int)obs_output_get_height(stream->output);
+
 	ftl_set_ingest_location(stream->stream_config, stream->path_ip.array);
 	ftl_set_authetication_key(stream->stream_config, stream->channel_id, stream->key.array);	
 
-	stream->video_component = ftl_create_video_component(FTL_VIDEO_H264, 96, stream->video_ssrc, stream->scale_width, stream->scale_height);
+	info("Setting output resolution to %dx%d\n", stream->width, stream->height);
+	stream->video_component = ftl_create_video_component(FTL_VIDEO_H264, 96, stream->video_ssrc, stream->width, stream->height);
 	ftl_attach_video_component_to_stream(stream->stream_config, stream->video_component);
 
 	stream->audio_component = ftl_create_audio_component(FTL_AUDIO_OPUS, 97, stream->audio_ssrc);
