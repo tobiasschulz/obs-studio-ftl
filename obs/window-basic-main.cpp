@@ -719,7 +719,7 @@ bool OBSBasic::LoadService()
 	obs_data_t *data = obs_data_create_from_json_file_safe(serviceJsonPath,
 			"bak");
 
-	obs_data_set_default_string(data, "type", "rtmp_common");
+	obs_data_set_default_string(data, "type", "ftl_beam");
 	type = obs_data_get_string(data, "type");
 
 	obs_data_t *settings = obs_data_get_obj(data, "settings");
@@ -894,7 +894,7 @@ bool OBSBasic::InitBasicConfigDefaults()
 	config_set_default_string(basicConfig, "Video", "ColorRange",
 			"Partial");
 
-	config_set_default_uint  (basicConfig, "Audio", "SampleRate", 44100);
+	config_set_default_uint  (basicConfig, "Audio", "SampleRate", 48000);
 	config_set_default_string(basicConfig, "Audio", "ChannelSetup",
 			"Stereo");
 

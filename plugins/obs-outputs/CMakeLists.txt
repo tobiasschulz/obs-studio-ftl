@@ -19,6 +19,8 @@ else()
 	add_definitions(-DNO_CRYPTO)
 endif()
 
+find_package(FTLSDK REQUIRED)
+include_directories(${FTLSDK_INCLUDE_DIRS})
 
 if(WIN32)
 	set(obs-outputs_PLATFORM_DEPS
@@ -31,38 +33,6 @@ if(MSVC)
 	set(obs-outputs_PLATFORM_DEPS
 		${obs-outputs_PLATFORM_DEPS}
 		w32-pthreads)
-endif()
-
-set(obs-outputs_libftl_HEADERS
-	libftl/ftl.h
-	libftl/hmac/hmac.h
-	libftl/hmac/sha2.h)
-
-if(WIN32)
-	set(obs-outputs_libftl_SOURCES
-		libftl/activate.c
-		libftl/components.c
-		libftl/deactivate.c
-		libftl/init.c
-		libftl/ftl.c
-		libftl/stream_configuration.c
-		libftl/logging.c
-		libftl/win32/socket.c
-		libftl/hmac/hmac.c
-		libftl/hmac/sha2.c
-		libftl/charon_protocol.c)	
-else()
-	set(obs-outputs_libftl_SOURCES
-		libftl/activate.c
-		libftl/components.c
-		libftl/deactivate.c
-		libftl/init.c
-		libftl/stream_configuration.c
-		libftl/logging.c
-		libftl/posix/socket.c
-		libftl/hmac/hmac.c
-		libftl/hmac/sha2.c
-		libftl/charon_protocol.c)	
 endif()
 
 set(obs-outputs_librtmp_HEADERS
@@ -99,8 +69,7 @@ set(obs-outputs_HEADERS
 	net-if.h
 	flv-mux.h
 	flv-output.h
-	librtmp
-	libftl)
+	librtmp)
 set(obs-outputs_SOURCES
 	obs-outputs.c
 	rtmp-stream.c
@@ -112,14 +81,13 @@ set(obs-outputs_SOURCES
 add_library(obs-outputs MODULE
 	${obs-outputs_SOURCES}
 	${obs-outputs_HEADER}
-	${obs-outputs_libftl_SOURCES}
-	${obs-outputs_libftl_HEADERS}
 	${obs-outputs_librtmp_SOURCES}
 	${obs-outputs_librtmp_HEADERS})
 target_link_libraries(obs-outputs
 	libobs
 	${SSL_LIBRARIES}
 	${ZLIB_LIBRARIES}
-	${obs-outputs_PLATFORM_DEPS})
+	${obs-outputs_PLATFORM_DEPS}
+	${FTLSDK_LIBRARIES})
 
 install_obs_plugin_with_data(obs-outputs data)
