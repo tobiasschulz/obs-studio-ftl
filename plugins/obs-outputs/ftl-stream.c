@@ -86,7 +86,6 @@ struct ftl_stream {
 
 	ftl_handle_t	    ftl_handle;
 	ftl_ingest_params_t params;
-	SOCKET           sb_socket;
 	uint32_t         scale_width, scale_height, width, height;
 };
 
@@ -521,35 +520,12 @@ static inline bool reset_semaphore(struct ftl_stream *stream)
 #define socklen_t int
 #endif
 
-#define MIN_SENDBUF_SIZE 65535
-
-static void adjust_sndbuf_size(struct ftl_stream *stream, int new_size)
-{
-	/*
-	int cur_sendbuf_size = new_size;
-	socklen_t int_size = sizeof(int);
-
-	getsockopt(stream->sb_socket, SOL_SOCKET, SO_SNDBUF,
-			(char*)&cur_sendbuf_size, &int_size);
-
-	if (cur_sendbuf_size < new_size) {
-		cur_sendbuf_size = new_size;
-		setsockopt(stream->sb_socket, SOL_SOCKET, SO_SNDBUF,
-				(const char*)&cur_sendbuf_size, int_size);
-	}
-	*/
-}
-
 static int init_send(struct ftl_stream *stream)
 {
 	int ret;
 	size_t idx = 0;
 	bool next = true;
-
-#if defined(_WIN32)
-	adjust_sndbuf_size(stream, MIN_SENDBUF_SIZE);
-#endif
-
+	
 	reset_semaphore(stream);
 
 	ret = pthread_create(&stream->send_thread, NULL, send_thread, stream);
@@ -938,6 +914,11 @@ static bool init_connect(struct ftl_stream *stream)
 	const char *bind_ip, *key;
 	char tmp_ip[20];
 	ftl_status_t status_code;
+
+/*
+	video_t *video = obs_encoder_video(obsx264->encoder);
+	const struct video_output_info *voi = video_output_get_info(video);
+*/
 
 	info("init_connect\n");
 
