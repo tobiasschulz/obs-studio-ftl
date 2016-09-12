@@ -5,7 +5,7 @@ elseif(WIN32 AND NOT CPACK_GENERATOR)
 	set(CPACK_GENERATOR "WIX" "ZIP")
 endif()
 
-set(CPACK_PACKAGE_NAME "OBS")
+set(CPACK_PACKAGE_NAME "OBS Studio - FTL")
 set(CPACK_PACKAGE_VENDOR "obsproject.com")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "OBS - Live video and audio streaming and recording software")
 
