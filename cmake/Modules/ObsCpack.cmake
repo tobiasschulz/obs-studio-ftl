@@ -31,8 +31,8 @@ MESSAGE(STATUS "OBS_VERSION: ${OBS_VERSION}")
 
 if(INSTALLER_RUN)
 	set(CPACK_PACKAGE_EXECUTABLES
-		"obs32" "OBS Studio (32bit)"
-		"obs64" "OBS Studio (64bit)")
+		"obs32" "OBS Studio (32bit) - FTL"
+		"obs64" "OBS Studio (64bit) - FTL")
 	set(CPACK_CREATE_DESKTOP_LINKS
 		"obs32"
 		"obs64")

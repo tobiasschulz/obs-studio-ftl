@@ -4,8 +4,8 @@ SET obs_version=0.15.4-ftl.2
 SET coredeps=C:\beam\tachyon_deps
 SET QTDIR64=C:\Qt\5.6\msvc2015_64
 SET QTDIR32=C:\Qt\5.6\msvc2015
-SET obsInstallerTempDir=%cd:\=/%/rundir/%build_config%
 SET PATH=%PATH%;C:\Program Files (x86)\MSBuild\14.0\Bin;C:\Program Files (x86)\CMake\bin
+SET startingPath=%cd%
 SET DepsPath32=%coredeps%\win32
 SET DepsPath64=%coredeps%\win64
 SET build32=
@@ -19,6 +19,9 @@ SET package=true
 )
 if "%1" == "win64" (
 SET build64=true
+)
+if "%1" == "package" (
+SET package=true
 )
 if "%1" == "clean" (
    IF NOT EXIST ..\build GOTO NOBUILDDIR
@@ -38,20 +41,33 @@ mkdir build
 :BUILD_DIR_EXISTS
 cd build
 if defined build32 (
-	cmake -G "Visual Studio 14 2015" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true .. || goto DONE
-	call msbuild /p:Configuration=%build_config% ALL_BUILD.vcxproj || goto DONE
+	ECHO Building 32bit OBS-Studio FTL
+	echo Currently in Directory %cd%	
+    rmdir CMakeFiles /s /q
+	del CMakeCache.txt
+	cmake -G "Visual Studio 14 2015" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true -DFTLSDK_INCLUDE_DIR=%ftl_inc_dir% -DFTLSDK_LIB=%ftl_lib_dir% .. || goto DONE
+	call msbuild /p:Configuration=%build_config% ALL_BUILD.vcxproj
 	copy %coredeps%\win32\bin\postproc-54.dll rundir\%build_config%\bin\32bit
 )
 if defined build64 (
+	ECHO Building 64bit OBS-Studio FTL
+	echo Currently in Directory %cd%	
+    rmdir CMakeFiles /s /q
+	del CMakeCache.txt
 	cmake -G "Visual Studio 14 2015 Win64" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true -DFTLSDK_INCLUDE_DIR=%ftl_inc_dir% -DFTLSDK_LIB=%ftl_lib_dir% .. || goto DONE
 	call msbuild /p:Configuration=%build_config%,Platform=x64 ALL_BUILD.vcxproj || goto DONE
 	copy %coredeps%\win64\bin\postproc-54.dll rundir\%build_config%\bin\64bit
 )
 if defined package (
-	cmake -G "Visual Studio 14 2015" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true -DINSTALLER_RUN=true ..
+	ECHO Packaging OBS-Studio FTL
+	echo Currently in Directory %cd%	
+	SET obsInstallerTempDir=%cd:\=/%/rundir/%build_config%
+    rmdir CMakeFiles /s /q
+	del CMakeCache.txt
+	cmake -G "Visual Studio 14 2015" -DOBS_VERSION_OVERRIDE=%obs_version% -DINSTALLER_RUN=true ..
 	call msbuild /p:Configuration=%build_config% PACKAGE.vcxproj || goto DONE
 )
-
+GOTO DONE
 :SUB_FTLSDK
     ECHO Building FTL SDK
 	pushd .
@@ -67,4 +83,5 @@ if defined package (
 	popd .
 	GOTO:EOF 
 :DONE
-popd .
+cd %startingPath%
+
