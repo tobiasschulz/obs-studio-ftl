@@ -8,17 +8,24 @@ SET obsInstallerTempDir=%cd:\=/%/rundir/%build_config%
 SET PATH=%PATH%;C:\Program Files (x86)\MSBuild\14.0\Bin;C:\Program Files (x86)\CMake\bin
 SET DepsPath32=%coredeps%\win32
 SET DepsPath64=%coredeps%\win64
+SET starting_dir=%cd%
+
 SET build32=
 SET build64=
 SET package=
-
 if "%1" == "all" (
-SET build32=true
-SET build64=true
-SET package=true
+	SET build32=true
+	SET build64=true
+	SET package=true
+)
+if "%1" == "win32" (
+	SET build32=true
 )
 if "%1" == "win64" (
-SET build64=true
+	SET build64=true
+)
+if "%1" == "package" (
+	SET package=true
 )
 if "%1" == "clean" (
    IF NOT EXIST ..\build GOTO NOBUILDDIR
@@ -30,7 +37,6 @@ pushd .
 cd ..
 call git submodule update --init
 pushd .
-cd ..
 call :SUB_FTLSDK
 popd .
 IF EXIST build GOTO BUILD_DIR_EXISTS
@@ -38,20 +44,27 @@ mkdir build
 :BUILD_DIR_EXISTS
 cd build
 if defined build32 (
-	cmake -G "Visual Studio 14 2015" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true .. || goto DONE
-	call msbuild /p:Configuration=%build_config% ALL_BUILD.vcxproj || goto DONE
+	echo %cd%
+	rmdir CMakeFiles /s /q
+	del CMakeCache.txt
+	call cmake -G "Visual Studio 14 2015" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true -DFTLSDK_INCLUDE_DIR=%ftl_inc_dir% -DFTLSDK_LIB=%ftl_lib_dir%  .. || goto DONE
+	call msbuild /p:Configuration=%build_config% ALL_BUILD.vcxproj
 	copy %coredeps%\win32\bin\postproc-54.dll rundir\%build_config%\bin\32bit
 )
 if defined build64 (
-	cmake -G "Visual Studio 14 2015 Win64" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true -DFTLSDK_INCLUDE_DIR=%ftl_inc_dir% -DFTLSDK_LIB=%ftl_lib_dir% .. || goto DONE
+	rmdir CMakeFiles /s /q
+	del CMakeCache.txt
+	call cmake -G "Visual Studio 14 2015 Win64" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true -DFTLSDK_INCLUDE_DIR=%ftl_inc_dir% -DFTLSDK_LIB=%ftl_lib_dir% .. || goto DONE
 	call msbuild /p:Configuration=%build_config%,Platform=x64 ALL_BUILD.vcxproj || goto DONE
 	copy %coredeps%\win64\bin\postproc-54.dll rundir\%build_config%\bin\64bit
 )
 if defined package (
-	cmake -G "Visual Studio 14 2015" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true -DINSTALLER_RUN=true ..
+	rmdir CMakeFiles /s /q
+	del CMakeCache.txt
+	call cmake -G "Visual Studio 14 2015" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true -DINSTALLER_RUN=true ..
 	call msbuild /p:Configuration=%build_config% PACKAGE.vcxproj || goto DONE
 )
-
+GOTO:EOF 
 :SUB_FTLSDK
     ECHO Building FTL SDK
 	pushd .
@@ -60,11 +73,19 @@ if defined package (
 	call git checkout xsplit
 	mkdir build
 	cd build
-	call cmake -G "Visual Studio 14 2015 Win64" .. || goto DONE
-	call msbuild /p:Configuration=%build_config%,Platform=x64 ALL_BUILD.vcxproj || goto DONE
-	SET ftl_lib_dir=%cd%\%build_config%\ftl.lib
-	SET ftl_inc_dir=%cd%\..\libftl	
+	if defined build32 (	
+		call cmake -G "Visual Studio 14 2015" .. || goto DONE
+		call msbuild /p:Configuration=%build_config%,ALL_BUILD.vcxproj || goto DONE
+		SET ftl_lib_dir=%cd%\%build_config%\ftl.lib
+		SET ftl_inc_dir=%cd%\..\libftl
+	)
+	if defined build64 (	
+		call cmake -G "Visual Studio 14 2015 Win64" .. || goto DONE
+		call msbuild /p:Configuration=%build_config%,Platform=x64 ALL_BUILD.vcxproj || goto DONE
+		SET ftl_lib_dir=%cd%\%build_config%\ftl.lib
+		SET ftl_inc_dir=%cd%\..\libftl
+	)	
 	popd .
 	GOTO:EOF 
 :DONE
-popd .
+cd %starting_dir%
