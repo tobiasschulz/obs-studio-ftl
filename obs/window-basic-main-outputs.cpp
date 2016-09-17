@@ -171,7 +171,7 @@ static bool CreateAACEncoder(OBSEncoder &res, string &id, int bitrate,
 /* ------------------------------------------------------------------------ */
 
 struct SimpleOutput : BasicOutputHandler {
-	OBSEncoder             opusStreaming;
+
 	OBSEncoder             aacStreaming;
 	OBSEncoder             h264Streaming;
 	OBSEncoder             aacRecording;
@@ -179,7 +179,7 @@ struct SimpleOutput : BasicOutputHandler {
 
 	string                 aacRecEncID;
 	string                 aacStreamEncID;
-	string                 opusStreamEncID;
+
 
 	string                 videoEncoder;
 	string                 videoQuality;
@@ -299,8 +299,20 @@ void SimpleOutput::LoadRecordingPreset()
 
 SimpleOutput::SimpleOutput(OBSBasic *main_) : BasicOutputHandler(main_)
 {
-	streamOutput = obs_output_create("ftl_output", "simple_stream",
-			nullptr, nullptr);
+	string serviceId = string(obs_service_get_type(main->GetService()));
+
+	string identifier = QString(serviceId.c_str()).split('_')[0].toStdString();
+
+	if (identifier == "rtmp") {
+		OBSBasic::codecName = "AAC";
+	}
+	else if (identifier == "ftl") {
+		OBSBasic::codecName = "OPUS";
+	}
+
+	streamOutput = obs_output_create((identifier + "_output").c_str(), "simple_stream",
+		nullptr, nullptr);
+
 	if (!streamOutput)
 		throw "Failed to create stream output (simple output)";
 	obs_output_release(streamOutput);
@@ -314,15 +326,11 @@ SimpleOutput::SimpleOutput(OBSBasic *main_) : BasicOutputHandler(main_)
 	else
 		LoadStreamingPreset_h264("obs_x264");
 
-#ifdef AUDIO_USE_OPUS
-	if (!CreateOpusEncoder(opusStreaming, opusStreamEncID, GetAudioBitrate(),
-		"simple_opus", 0))
-		throw "Failed to create opus streaming encoder (simple output)";
-#else
+
 	if (!CreateAACEncoder(aacStreaming, aacStreamEncID, GetAudioBitrate(),
 				"simple_aac", 0))
 		throw "Failed to create aac streaming encoder (simple output)";
-#endif
+
 
 	streamDelayStarting.Connect(obs_output_get_signal_handler(streamOutput),
 			"starting", OBSStreamStarting, this);
@@ -398,27 +406,19 @@ void SimpleOutput::Update()
 		obs_data_set_string(h264Settings, "x264opts", custom);
 	}
 
-#ifdef AUDIO_USE_OPUS
-	obs_data_set_string(opusSettings, "rate_control", "CBR");
-	obs_data_set_int(opusSettings, "bitrate", audioBitrate);
 
-	obs_service_apply_encoder_settings(main->GetService(),
-		h264Settings, opusSettings);
-#else
 	obs_data_set_string(aacSettings, "rate_control", "CBR");
 	obs_data_set_int(aacSettings, "bitrate", audioBitrate);
 
 	obs_service_apply_encoder_settings(main->GetService(),
 			h264Settings, aacSettings);
-#endif
+
 
 	if (advanced && !enforceBitrate) {
 		obs_data_set_int(h264Settings, "bitrate", videoBitrate);
-#ifdef AUDIO_USE_OPUS
-		obs_data_set_int(opusSettings, "bitrate", audioBitrate);
-#else
+
 		obs_data_set_int(aacSettings, "bitrate", audioBitrate);
-#endif
+
 	}
 
 	video_t *video = obs_get_video();
@@ -430,13 +430,10 @@ void SimpleOutput::Update()
 
 	obs_encoder_update(h264Streaming, h264Settings);
 	obs_data_release(h264Settings);
-#ifdef AUDIO_USE_OPUS
-	obs_encoder_update(opusStreaming, opusSettings);
-	obs_data_release(opusSettings);
-#else
+
 	obs_encoder_update(aacStreaming,  aacSettings);
 	obs_data_release(aacSettings);
-#endif
+
 }
 
 void SimpleOutput::UpdateRecordingAudioSettings()
@@ -559,11 +556,9 @@ inline void SimpleOutput::SetupOutputs()
 {
 	SimpleOutput::Update();
 	obs_encoder_set_video(h264Streaming, obs_get_video());
-#ifdef AUDIO_USE_OPUS
-	obs_encoder_set_audio(opusStreaming,  obs_get_audio());
-#else
+
 	obs_encoder_set_audio(aacStreaming, obs_get_audio());
-#endif
+
 
 	if (usingRecordingPreset) {
 		if (ffmpegOutput) {
@@ -578,15 +573,37 @@ inline void SimpleOutput::SetupOutputs()
 
 bool SimpleOutput::StartStreaming(obs_service_t *service)
 {
+
+	string serviceId = string(obs_service_get_type(main->GetService()));
+
+	string identifier = QString(serviceId.c_str()).split('_')[0].toStdString();
+
+	if (identifier == "rtmp") {
+		OBSBasic::codecName = "AAC";
+	}
+	else if (identifier == "ftl") {
+		OBSBasic::codecName = "OPUS";
+	}
+
+
+	QString outputId = QString(obs_output_get_id(streamOutput));
+	if (!outputId.startsWith(QString(identifier.c_str()))) {
+		streamOutput = obs_output_create((identifier + "_output").c_str(), "simple_stream",
+			nullptr, nullptr);
+	}
+
+	if (!CreateAACEncoder(aacStreaming, aacStreamEncID, GetAudioBitrate(),
+		"simple_aac", 0))
+		throw "Failed to create aac streaming encoder (simple output)";
+
+
 	if (!Active())
 		SetupOutputs();
 
 	obs_output_set_video_encoder(streamOutput, h264Streaming);
-#ifdef AUDIO_USE_OPUS
-	obs_output_set_audio_encoder(streamOutput, opusStreaming, 0);
-#else
+
 	obs_output_set_audio_encoder(streamOutput, aacStreaming, 0);
-#endif
+
 	obs_output_set_service(streamOutput, service);
 
 	bool reconnect = config_get_bool(main->Config(), "Output",
