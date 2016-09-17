@@ -5,6 +5,10 @@
 #include "window-basic-main.hpp"
 #include "window-basic-main-outputs.hpp"
 
+extern "C" {
+	const char *obs_service_get_type(const obs_service_t *service);
+	const char *obs_output_get_id(const obs_output_t *output);
+}
 using namespace std;
 
 static void OBSStreamStarting(void *data, calldata_t *params)
@@ -119,7 +123,7 @@ static void FindBestFilename(string &strPath, bool noSpace)
 static bool CreateOpusEncoder(OBSEncoder &res, string &id, int bitrate,
 	const char *name, size_t idx)
 {
-	const char *id_ = GetAACEncoderForBitrate(bitrate);
+	const char *id_ = GetAACEncoderForBitrate(bitrate, OBSBasic::codecName);
 	if (!id_) {
 		id.clear();
 		res = nullptr;
@@ -143,7 +147,7 @@ static bool CreateOpusEncoder(OBSEncoder &res, string &id, int bitrate,
 static bool CreateAACEncoder(OBSEncoder &res, string &id, int bitrate,
 		const char *name, size_t idx)
 {
-	const char *id_ = GetAACEncoderForBitrate(bitrate);
+	const char *id_ = GetAACEncoderForBitrate(bitrate, OBSBasic::codecName);
 	if (!id_) {
 		id.clear();
 		res = nullptr;
@@ -354,7 +358,7 @@ int SimpleOutput::GetAudioBitrate() const
 	int bitrate = (int)config_get_uint(main->Config(), "SimpleOutput",
 			"ABitrate");
 
-	return FindClosestAvailableAACBitrate(bitrate);
+	return FindClosestAvailableAACBitrate(bitrate, OBSBasic::codecName);
 }
 
 void SimpleOutput::Update()
@@ -798,10 +802,25 @@ AdvancedOutput::AdvancedOutput(OBSBasic *main_) : BasicOutputHandler(main_)
 	OBSData streamEncSettings = GetDataFromJsonFile("streamEncoder.json");
 	OBSData recordEncSettings = GetDataFromJsonFile("recordEncoder.json");
 
-//	streamOutput = obs_output_create("rtmp_output", "adv_stream",
-//			nullptr, nullptr);
-	streamOutput = obs_output_create("ftl_output", "adv_stream",
-		nullptr, nullptr);
+	string serviceId = string(obs_service_get_type(main->GetService())) ;
+
+	string identifier = QString(serviceId.c_str()).split('_') [0].toStdString() ;
+
+	if (identifier == "rtmp") {
+		OBSBasic::codecName = "AAC";
+	}
+	else if (identifier == "ftl") {
+		OBSBasic::codecName = "OPUS";
+	}
+
+	streamOutput = obs_output_create((identifier + "_output").c_str(), "adv_stream",
+			nullptr, nullptr);
+
+	/*streamOutput = obs_output_create("ftl_output", "adv_stream",
+		nullptr, nullptr);*/
+
+	/*streamOutput = obs_output_create("rtmp_output", "adv_stream",
+		nullptr, nullptr);*/
 
 	if (!streamOutput)
 		throw "Failed to create stream output (advanced output)";
@@ -1119,11 +1138,34 @@ int AdvancedOutput::GetAudioBitrate(size_t i) const
 		"Track3Bitrate", "Track4Bitrate",
 	};
 	int bitrate = (int)config_get_uint(main->Config(), "AdvOut", names[i]);
-	return FindClosestAvailableAACBitrate(bitrate);
+	return FindClosestAvailableAACBitrate(bitrate, OBSBasic::codecName);
 }
 
 bool AdvancedOutput::StartStreaming(obs_service_t *service)
 {
+
+	QString serviceId = QString(obs_service_get_type(main->GetService()));
+	QString identifier = serviceId.split('_')[0];
+	if (identifier == "rtmp") {
+		OBSBasic::codecName = "AAC";
+	}
+	else if (identifier == "ftl") {
+		OBSBasic::codecName = "OPUS";
+	}
+	QString outputId = QString(obs_output_get_id(streamOutput));
+	if (!outputId.startsWith(identifier)) {
+		streamOutput = obs_output_create((identifier + "_output").toStdString().c_str(), "adv_stream",
+			nullptr, nullptr);
+	}
+	for (int i = 0; i < 4; i++) {
+		char name[9];
+		sprintf(name, "adv_aac%d", i);
+
+		if (!CreateAACEncoder(aacTrack[i], aacEncoderID[i],
+			GetAudioBitrate(i), name, i))
+			throw "Failed to create audio encoder "
+			"(advanced output)";
+	}
 	if (!useStreamEncoder ||
 	    (!ffmpegOutput && !obs_output_active(fileOutput))) {
 		UpdateStreamSettings();

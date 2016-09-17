@@ -4412,3 +4412,5 @@ void OBSBasic::on_actionLockPreview_triggered()
 	ui->preview->ToggleLocked();
 	ui->actionLockPreview->setChecked(ui->preview->Locked());
 }
+
+string OBSBasic::codecName;
