@@ -317,44 +317,21 @@ static int send_packet(struct ftl_stream *stream,
 				video_stream += 4;
 			}
 
-			ftl_ingest_send_media(&stream->ftl_handle, FTL_VIDEO_DATA, video_stream, len);
 			consumed += len;
-			video_stream += len;
+			//throw away access delimiter packets
+			//if (video_stream[0] != 9 && video_stream[0] != 12) 
+			{
 
-#if 0
-			int pkt_len;
-			int payload_size;
+				int send_marker_bit = (consumed >= packet->size) && !is_header;
 
-			int remaining = len;
-			int first_fu = 1;
-
-			while (remaining > 0) {
-
-				uint16_t sn = ftl->media[OBS_ENCODER_VIDEO].seq_num;
-				uint32_t ssrc = ftl->media[OBS_ENCODER_VIDEO].ssrc;
-				uint8_t *pkt_buf;
-				pkt_buf = _nack_get_empty_packet(ftl, ssrc, sn, &pkt_len);
-
-				payload_size = _make_video_rtp_packet(ftl, p, remaining, pkt_buf, &pkt_len, first_fu);
-
-				first_fu = 0;
-				remaining -= payload_size;
-				consumed += payload_size;
-				p += payload_size;
-
-				/*if all data has been consumed set marker bit*/
-				if ((packet->size - consumed) == 0 && !is_header) {
-					_set_marker_bit(ftl, OBS_ENCODER_VIDEO, pkt_buf);
-				}
-
-				_nack_send_packet(ftl, ssrc, sn, pkt_len);
+				ftl_ingest_send_media(&stream->ftl_handle, FTL_VIDEO_DATA, video_stream, len, send_marker_bit);
 			}
-#endif
+			video_stream += len;
 		}
 
 	}
 	else if (packet->type == OBS_ENCODER_AUDIO) {
-		ftl_ingest_send_media(&stream->ftl_handle, FTL_AUDIO_DATA, packet->data, packet->size);
+		ftl_ingest_send_media(&stream->ftl_handle, FTL_AUDIO_DATA, packet->data, packet->size, 0);
 	}
 	else {
 		warn("Got packet type %d\n", packet->type);
@@ -949,7 +926,7 @@ static bool init_connect(struct ftl_stream *stream)
 	stream->params.audio_codec = FTL_AUDIO_OPUS;
 	stream->params.ingest_hostname = stream->path_ip.array;
 	stream->params.status_callback = NULL;
-	stream->params.video_frame_rate = (float)33;
+	stream->params.video_frame_rate = (float)60;
 
 	if ((status_code = ftl_ingest_create(&stream->ftl_handle, &stream->params)) != FTL_SUCCESS) {
 		printf("Failed to create ingest handle %d\n", status_code);
