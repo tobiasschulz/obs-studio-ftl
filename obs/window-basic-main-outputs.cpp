@@ -588,8 +588,23 @@ bool SimpleOutput::StartStreaming(obs_service_t *service)
 
 	QString outputId = QString(obs_output_get_id(streamOutput));
 	if (!outputId.startsWith(QString(identifier.c_str()))) {
+		streamDelayStarting.Disconnect();
+		streamStopping.Disconnect();
+		startStreaming.Disconnect();
+		stopStreaming.Disconnect();
+
 		streamOutput = obs_output_create((identifier + "_output").c_str(), "simple_stream",
 			nullptr, nullptr);
+
+		streamDelayStarting.Connect(obs_output_get_signal_handler(streamOutput),
+			"starting", OBSStreamStarting, this);
+		streamStopping.Connect(obs_output_get_signal_handler(streamOutput),
+			"stopping", OBSStreamStopping, this);
+
+		startStreaming.Connect(obs_output_get_signal_handler(streamOutput),
+			"start", OBSStartStreaming, this);
+		stopStreaming.Connect(obs_output_get_signal_handler(streamOutput),
+			"stop", OBSStopStreaming, this);
 	}
 
 	if (!CreateAACEncoder(aacStreaming, aacStreamEncID, GetAudioBitrate(),
@@ -1171,8 +1186,23 @@ bool AdvancedOutput::StartStreaming(obs_service_t *service)
 	}
 	QString outputId = QString(obs_output_get_id(streamOutput));
 	if (!outputId.startsWith(identifier)) {
+		streamDelayStarting.Disconnect();
+		streamStopping.Disconnect();
+		startStreaming.Disconnect();
+		stopStreaming.Disconnect();
+
 		streamOutput = obs_output_create((identifier + "_output").toStdString().c_str(), "adv_stream",
 			nullptr, nullptr);
+
+		streamDelayStarting.Connect(obs_output_get_signal_handler(streamOutput),
+			"starting", OBSStreamStarting, this);
+		streamStopping.Connect(obs_output_get_signal_handler(streamOutput),
+			"stopping", OBSStreamStopping, this);
+
+		startStreaming.Connect(obs_output_get_signal_handler(streamOutput),
+			"start", OBSStartStreaming, this);
+		stopStreaming.Connect(obs_output_get_signal_handler(streamOutput),
+			"stop", OBSStopStreaming, this);
 	}
 	for (int i = 0; i < 4; i++) {
 		char name[9];
