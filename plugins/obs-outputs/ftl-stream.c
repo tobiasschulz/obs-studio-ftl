@@ -95,7 +95,8 @@ static bool init_connect(struct ftl_stream *stream);
 static void *connect_thread(void *data);
 
 void log_test(ftl_log_severity_t log_level, const char * message) {
-	fprintf(stderr, "libftl message: %s\n", message);
+	//fprintf(stderr, "libftl message: %s\n", message);
+	blog(log_level, "[ftl stream: '%s']", message);
 	return;
 }
 
@@ -337,9 +338,10 @@ static int send_packet(struct ftl_stream *stream,
 		warn("Got packet type %d\n", packet->type);
 	}
 
+	stream->total_bytes_sent += packet->size;
+
 	obs_free_encoder_packet(packet);
 
-	stream->total_bytes_sent += packet->size;
 	return ret;
 }
 
@@ -830,12 +832,8 @@ static obs_properties_t *ftl_stream_properties(void *unused)
 static uint64_t ftl_stream_total_bytes_sent(void *data)
 {
 	struct ftl_stream *stream = data;
-	//info("ftl_stream_total_bytes_sent\n");
 
-	return 0;
-	/*
 	return stream->total_bytes_sent;
-	*/
 }
 
 static int ftl_stream_dropped_frames(void *data)
@@ -919,6 +917,12 @@ static bool init_connect(struct ftl_stream *stream)
 	lookup_ingest_ip(stream->path.array, tmp_ip);
 	dstr_copy(&stream->path_ip, tmp_ip);
 	key = obs_service_get_key(service);
+
+	struct obs_video_info ovi;
+	float frame_rate = 30;
+	if (obs_get_video_info(&ovi)) {
+		frame_rate = (float)ovi.fps_num / (float)ovi.fps_den;
+	}
 	
 	stream->params.log_func = log_test;
 	stream->params.stream_key = key;
@@ -926,7 +930,7 @@ static bool init_connect(struct ftl_stream *stream)
 	stream->params.audio_codec = FTL_AUDIO_OPUS;
 	stream->params.ingest_hostname = stream->path_ip.array;
 	stream->params.status_callback = NULL;
-	stream->params.video_frame_rate = (float)60;
+	stream->params.video_frame_rate = frame_rate;
 
 	if ((status_code = ftl_ingest_create(&stream->ftl_handle, &stream->params)) != FTL_SUCCESS) {
 		printf("Failed to create ingest handle %d\n", status_code);
