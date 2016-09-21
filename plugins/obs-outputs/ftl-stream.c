@@ -57,6 +57,7 @@ struct ftl_stream {
 
 	volatile bool    connecting;
 	pthread_t        connect_thread;
+	pthread_t        status_thread;
 
 	volatile bool    active;
 	volatile bool    disconnected;
@@ -93,6 +94,7 @@ struct ftl_stream {
 void log_libftl_messages(ftl_log_severity_t log_level, const char * message);
 static bool init_connect(struct ftl_stream *stream);
 static void *connect_thread(void *data);
+static void *status_thread(void *data);
 
 void log_test(ftl_log_severity_t log_level, const char * message) {
 	//fprintf(stderr, "libftl message: %s\n", message);
@@ -165,8 +167,10 @@ static void ftl_stream_destroy(void *data)
 		pthread_join(stream->send_thread, NULL);
 
 	} else if (connecting(stream) || active(stream)) {
-		if (stream->connecting)
+		if (stream->connecting) {
+			pthread_join(stream->status_thread, NULL);
 			pthread_join(stream->connect_thread, NULL);
+		}
 
 		stream->stop_ts = 0;
 		os_event_signal(stream->stop_event);
@@ -229,8 +233,10 @@ static void ftl_stream_stop(void *data, uint64_t ts)
 	if (stopping(stream))
 		return;
 
-	if (connecting(stream))
+	if (connecting(stream)) {
+		pthread_join(stream->status_thread, NULL);
 		pthread_join(stream->connect_thread, NULL);
+	}
 
 	stream->stop_ts = ts / 1000ULL;
 	os_event_signal(stream->stop_event);
@@ -637,6 +643,8 @@ static int try_connect(struct ftl_stream *stream)
 
 	info("Connection to %s (%s) successful", stream->path.array, stream->path_ip.array);
 
+	pthread_create(&stream->status_thread, NULL, status_thread, stream);
+
 	return init_send(stream);
 }
 
@@ -652,6 +660,7 @@ static bool ftl_stream_start(void *data)
 		return false;
 
 	os_atomic_set_bool(&stream->connecting, true);
+
 	return pthread_create(&stream->connect_thread, NULL, connect_thread,
 			stream) == 0;
 }
@@ -846,7 +855,36 @@ static int ftl_stream_dropped_frames(void *data)
 
 
 /*********************************************************************/
+static void *status_thread(void *data)
+{
+	struct ftl_stream *stream = data;
 
+	ftl_status_msg_t status;
+	ftl_status_t status_code;
+
+	while (!disconnected(stream)) {
+		ftl_ingest_get_status(&stream->ftl_handle, &status, INFINITE);
+
+		if (status.type == FTL_STATUS_EVENT && status.msg.event.type == FTL_STATUS_EVENT_TYPE_DISCONNECTED) {
+			blog(LOG_INFO, "Disconnected from ingest for reason %d\n", status.msg.event.reason);
+			//obs_output_signal_stop(stream->output, OBS_OUTPUT_DISCONNECTED);
+			//attempt reconnection
+			blog(LOG_WARNING, "Reconnecting to Ingest\n");
+			if ((status_code = ftl_ingest_connect(&stream->ftl_handle)) != FTL_SUCCESS) {
+				blog(LOG_WARNING, "Failed to connect to ingest %d\n", status_code);
+				return -1;
+			}
+			blog(LOG_WARNING, "Done\n");
+
+		}
+		else {
+			blog(LOG_INFO, "Status:  Got Status message of type %d\n", status.type);
+		}
+	}
+
+	blog(LOG_INFO, "status_thread:  Exited");
+
+}
 
 static void *connect_thread(void *data)
 {
