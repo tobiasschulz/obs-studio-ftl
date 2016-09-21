@@ -867,12 +867,17 @@ static void *status_thread(void *data)
 
 		if (status.type == FTL_STATUS_EVENT && status.msg.event.type == FTL_STATUS_EVENT_TYPE_DISCONNECTED) {
 			blog(LOG_INFO, "Disconnected from ingest for reason %d\n", status.msg.event.reason);
-			//obs_output_signal_stop(stream->output, OBS_OUTPUT_DISCONNECTED);
+
+			if (status.msg.event.reason == FTL_STATUS_EVENT_REASON_API_REQUEST) {
+				break;
+			}
+
 			//attempt reconnection
 			blog(LOG_WARNING, "Reconnecting to Ingest\n");
 			if ((status_code = ftl_ingest_connect(&stream->ftl_handle)) != FTL_SUCCESS) {
 				blog(LOG_WARNING, "Failed to connect to ingest %d\n", status_code);
-				return -1;
+				obs_output_signal_stop(stream->output, OBS_OUTPUT_DISCONNECTED);
+				return;
 			}
 			blog(LOG_WARNING, "Done\n");
 
@@ -882,8 +887,7 @@ static void *status_thread(void *data)
 		}
 	}
 
-	blog(LOG_INFO, "status_thread:  Exited");
-
+	//blog(LOG_INFO, "status_thread:  Exited");
 }
 
 static void *connect_thread(void *data)
