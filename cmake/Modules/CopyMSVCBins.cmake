@@ -130,6 +130,7 @@ file(GLOB CURL_BIN_FILES
 
 file(GLOB FTL_BIN_FILES
 	"${FTLSDK_INCLUDE_DIR}/../build/Release/ftl.dll"
+	"C:/deps/ftl-sdk/pthreads-win32/dll/x64/pthreadVC2.dll"
 	)		
 
 if (ZLIB_LIB)
