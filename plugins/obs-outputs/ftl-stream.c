@@ -168,8 +168,10 @@ static void ftl_stream_destroy(void *data)
 
 	} else if (connecting(stream) || active(stream)) {
 		if (stream->connecting) {
+			info("wait for connect_thread to terminate");
 			pthread_join(stream->status_thread, NULL);
 			pthread_join(stream->connect_thread, NULL);
+			info("wait for connect_thread to terminate: done");
 		}
 
 		stream->stop_ts = 0;
@@ -182,8 +184,9 @@ static void ftl_stream_destroy(void *data)
 		}
 	}
 
+	info("ingest destroy");
 	if ((status_code = ftl_ingest_destroy(&stream->ftl_handle)) != FTL_SUCCESS) {
-		printf("Failed to disconnect from ingest %d\n", status_code);
+		info("Failed to destroy from ingest %d\n", status_code);
 	}
 
 	if (stream) {
@@ -404,12 +407,11 @@ static void *send_thread(void *data)
 		obs_output_end_data_capture(stream->output);
 	}
 
+	info("ingest disconnect");
 	if ((status_code = ftl_ingest_disconnect(&stream->ftl_handle)) != FTL_SUCCESS) {
 		printf("Failed to disconnect from ingest %d\n", status_code);
 	}
-
-//	stream->stream_config = 0; /* FTL requires the pointer be 0ed out */
-
+	
 	free_packets(stream);
 	os_event_reset(stream->stop_event);
 	os_atomic_set_bool(&stream->active, false);
@@ -863,7 +865,11 @@ static void *status_thread(void *data)
 	ftl_status_t status_code;
 
 	while (!disconnected(stream)) {
-		ftl_ingest_get_status(&stream->ftl_handle, &status, INFINITE);
+		if ((status_code = ftl_ingest_get_status(&stream->ftl_handle, &status, INFINITE)) < 0) {
+			blog(LOG_INFO, "ftl_ingest_get_status returned %d\n", status_code);
+			Sleep(500);
+			continue;
+		}
 
 		if (status.type == FTL_STATUS_EVENT && status.msg.event.type == FTL_STATUS_EVENT_TYPE_DISCONNECTED) {
 			blog(LOG_INFO, "Disconnected from ingest for reason %d\n", status.msg.event.reason);
@@ -887,7 +893,9 @@ static void *status_thread(void *data)
 		}
 	}
 
-	//blog(LOG_INFO, "status_thread:  Exited");
+	blog(LOG_INFO, "status_thread:  Exited");
+	pthread_detach(stream->status_thread);
+	return NULL;
 }
 
 static void *connect_thread(void *data)
