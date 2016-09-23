@@ -31,10 +31,11 @@ if "%1" == "clean" (
 )
 pushd .
 cd ..
-call git submodule update --init
 pushd .
-cd ..
-call :SUB_FTLSDK
+call git submodule update --init
+cd plugins\libftl\ftl-sdk
+call git checkout xsplit
+REM call :SUB_FTLSDK
 popd .
 IF EXIST build GOTO BUILD_DIR_EXISTS
 mkdir build
@@ -45,7 +46,7 @@ if defined build32 (
 	echo Currently in Directory %cd%	
     rmdir CMakeFiles /s /q
 	del CMakeCache.txt
-	cmake -G "Visual Studio 14 2015" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true -DFTLSDK_INCLUDE_DIR=%ftl_inc_dir% -DFTLSDK_LIB=%ftl_lib_dir% .. || goto DONE
+	cmake -G "Visual Studio 14 2015" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true .. || goto DONE
 	call msbuild /p:Configuration=%build_config% ALL_BUILD.vcxproj
 	copy %coredeps%\win32\bin\postproc-54.dll rundir\%build_config%\bin\32bit
 )
@@ -54,7 +55,7 @@ if defined build64 (
 	echo Currently in Directory %cd%	
     rmdir CMakeFiles /s /q
 	del CMakeCache.txt
-	cmake -G "Visual Studio 14 2015 Win64" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true -DFTLSDK_INCLUDE_DIR=%ftl_inc_dir% -DFTLSDK_LIB=%ftl_lib_dir% .. || goto DONE
+	cmake -G "Visual Studio 14 2015 Win64" -DOBS_VERSION_OVERRIDE=%obs_version% -DCOPIED_DEPENDENCIES=false -DCOPY_DEPENDENCIES=true .. || goto DONE
 	call msbuild /p:Configuration=%build_config%,Platform=x64 ALL_BUILD.vcxproj || goto DONE
 	copy %coredeps%\win64\bin\postproc-54.dll rundir\%build_config%\bin\64bit
 )

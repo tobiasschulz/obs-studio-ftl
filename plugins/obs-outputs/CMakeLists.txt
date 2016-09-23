@@ -19,9 +19,6 @@ else()
 	add_definitions(-DNO_CRYPTO)
 endif()
 
-find_package(FTLSDK REQUIRED)
-include_directories(${FTLSDK_INCLUDE_DIRS})
-
 if(WIN32)
 	set(obs-outputs_PLATFORM_DEPS
 		ws2_32
@@ -87,7 +84,7 @@ target_link_libraries(obs-outputs
 	libobs
 	${SSL_LIBRARIES}
 	${ZLIB_LIBRARIES}
-	${obs-outputs_PLATFORM_DEPS}
-	${FTLSDK_LIBRARIES})
+	libftl
+	${obs-outputs_PLATFORM_DEPS})
 
 install_obs_plugin_with_data(obs-outputs data)
