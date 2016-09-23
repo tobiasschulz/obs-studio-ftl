@@ -5,3 +5,6 @@
 [submodule "plugins/mac-syphon/syphon-framework"]
 	path = plugins/mac-syphon/syphon-framework
 	url = https://github.com/palana/Syphon-Framework.git
+[submodule "plugins/libftl/ftl-sdk"]
+	path = plugins/libftl/ftl-sdk
+	url = https://github.com/WatchBeam/ftl-sdk.git

@@ -128,10 +128,6 @@ file(GLOB CURL_BIN_FILES
 	"${CURL_INCLUDE_DIR}/bin/curl*.dll"
 	)
 
-file(GLOB FTL_BIN_FILES
-	"${FTLSDK_INCLUDE_DIR}/../build/Release/ftl.dll"
-	)		
-
 if (ZLIB_LIB)
 	GET_FILENAME_COMPONENT(ZLIB_BIN_PATH ${ZLIB_LIB} PATH)
 endif()
