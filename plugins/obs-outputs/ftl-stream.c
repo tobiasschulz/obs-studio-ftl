@@ -290,11 +290,9 @@ static int send_packet(struct ftl_stream *stream,
 	int     recv_size = 0;
 	int     ret = 0;
 
-	flv_packet_mux(packet, &data, &size, is_header);
 #ifdef TEST_FRAMEDROPS
 	os_sleep_ms(rand() % 40);
 #endif
-	//ret = FTL_sendPackets(&stream->ftl, packet, (int)idx, is_header);
 	if (packet->type == OBS_ENCODER_VIDEO) {
 		int consumed = 0;
 		int len = packet->size;
@@ -350,7 +348,6 @@ static int send_packet(struct ftl_stream *stream,
 	stream->total_bytes_sent += packet->size;
 
 	obs_free_encoder_packet(packet);
-
 	return ret;
 }
 
