@@ -213,7 +213,7 @@ static void *ftl_stream_create(obs_data_t *settings, obs_output_t *output)
 	
 	stream->output = output;
 	pthread_mutex_init_value(&stream->packets_mutex);
-
+	
 	ftl_init();
 
 	if (pthread_mutex_init(&stream->packets_mutex, NULL) != 0)
@@ -937,10 +937,6 @@ static bool init_connect(struct ftl_stream *stream)
 	char tmp_ip[20];
 	ftl_status_t status_code;
 
-/*
-	video_t *video = obs_encoder_video(obsx264->encoder);
-	const struct video_output_info *voi = video_output_get_info(video);
-*/
 
 	info("init_connect\n");
 
@@ -960,6 +956,9 @@ static bool init_connect(struct ftl_stream *stream)
 	stream->min_priority     = 0;
 
 	settings = obs_output_get_settings(stream->output);
+	obs_encoder_t *video_encoder = obs_output_get_video_encoder(stream->output);
+	obs_data_t *video_settings = obs_encoder_get_settings(video_encoder);
+
 	dstr_copy(&stream->path,     obs_service_get_url(service));
 	lookup_ingest_ip(stream->path.array, tmp_ip);
 	dstr_copy(&stream->path_ip, tmp_ip);
@@ -970,7 +969,7 @@ static bool init_connect(struct ftl_stream *stream)
 	if (obs_get_video_info(&ovi)) {
 		frame_rate = (float)ovi.fps_num / (float)ovi.fps_den;
 	}
-	
+
 	stream->params.log_func = log_test;
 	stream->params.stream_key = key;
 	stream->params.video_codec = FTL_VIDEO_H264;
@@ -978,6 +977,8 @@ static bool init_connect(struct ftl_stream *stream)
 	stream->params.ingest_hostname = stream->path_ip.array;
 	stream->params.status_callback = NULL;
 	stream->params.video_frame_rate = frame_rate;
+	stream->params.video_kbps = obs_data_get_int(video_settings, "bitrate");
+
 
 	if ((status_code = ftl_ingest_create(&stream->ftl_handle, &stream->params)) != FTL_SUCCESS) {
 		printf("Failed to create ingest handle %d\n", status_code);
