@@ -264,8 +264,8 @@ void SimpleOutput::LoadRecordingPreset()
 	ffmpegOutput = false;
 
 	if (strcmp(quality, "Stream") == 0) {
-		h264Recording = h264Streaming;
-		aacRecording = aacStreaming;
+		//h264Recording = h264Streaming;
+		//aacRecording = aacStreaming;
 		usingRecordingPreset = false;
 		return;
 
@@ -671,12 +671,18 @@ static void ensure_directory_exists(string &path)
 
 bool SimpleOutput::StartRecording()
 {
+	OBSBasic::codecName = "AAC";
+
 	if (usingRecordingPreset) {
 		if (!ffmpegOutput)
 			UpdateRecordingSettings();
 	} else if (!obs_output_active(streamOutput)) {
 		Update();
 	}
+
+	if (!CreateAACEncoder(aacStreaming, aacStreamEncID, GetAudioBitrate(),
+		"simple_aac", 0))
+		throw "Failed to create aac streaming encoder (simple output)";
 
 	if (!Active())
 		SetupOutputs();
@@ -719,8 +725,14 @@ bool SimpleOutput::StartRecording()
 		FindBestFilename(strPath, noSpace);
 
 	if (!ffmpegOutput) {
-		obs_output_set_video_encoder(fileOutput, h264Recording);
-		obs_output_set_audio_encoder(fileOutput, aacRecording, 0);
+		if (!usingRecordingPreset) {
+			obs_output_set_video_encoder(fileOutput, h264Streaming);
+			obs_output_set_audio_encoder(fileOutput, aacStreaming, 0);
+		}
+		else {
+			obs_output_set_video_encoder(fileOutput, h264Recording);
+			obs_output_set_audio_encoder(fileOutput, aacRecording, 0);
+		}
 	}
 
 	obs_data_t *settings = obs_data_create();
@@ -1260,6 +1272,7 @@ bool AdvancedOutput::StartStreaming(obs_service_t *service)
 
 bool AdvancedOutput::StartRecording()
 {
+	
 	const char *path;
 	const char *recFormat;
 	const char *filenameFormat;
@@ -1272,6 +1285,17 @@ bool AdvancedOutput::StartRecording()
 		}
 	} else if (!obs_output_active(streamOutput)) {
 		UpdateStreamSettings();
+	}
+
+	OBSBasic::codecName = "AAC";
+	for (int i = 0; i < 4; i++) {
+		char name[9];
+		sprintf(name, "adv_aac%d", i);
+
+		if (!CreateAACEncoder(aacTrack[i], aacEncoderID[i],
+			GetAudioBitrate(i), name, i))
+			throw "Failed to create audio encoder "
+			"(advanced output)";
 	}
 
 	UpdateAudioSettings();
