@@ -284,11 +284,10 @@ static inline bool get_next_packet(struct ftl_stream *stream,
 static int send_packet(struct ftl_stream *stream,
 		struct encoder_packet *packet, bool is_header, size_t idx)
 {
-	uint8_t *data;
 	enum obs_encoder_type type;
-	size_t  size;
 	int     recv_size = 0;
 	int     ret = 0;
+	int bytes_sent = 0;
 
 #ifdef TEST_FRAMEDROPS
 	os_sleep_ms(rand() % 40);
@@ -326,26 +325,23 @@ static int send_packet(struct ftl_stream *stream,
 			}
 
 			consumed += len;
-			//throw away access delimiter packets
-			//if (video_stream[0] != 9 && video_stream[0] != 12) 
-			{
+			
+			int send_marker_bit = (consumed >= packet->size) && !is_header;
 
-				int send_marker_bit = (consumed >= packet->size) && !is_header;
+			bytes_sent += ftl_ingest_send_media(&stream->ftl_handle, FTL_VIDEO_DATA, video_stream, len, send_marker_bit);
 
-				ftl_ingest_send_media(&stream->ftl_handle, FTL_VIDEO_DATA, video_stream, len, send_marker_bit);
-			}
 			video_stream += len;
 		}
 
 	}
 	else if (packet->type == OBS_ENCODER_AUDIO) {
-		ftl_ingest_send_media(&stream->ftl_handle, FTL_AUDIO_DATA, packet->data, packet->size, 0);
+		bytes_sent += ftl_ingest_send_media(&stream->ftl_handle, FTL_AUDIO_DATA, packet->data, packet->size, 0);
 	}
 	else {
 		warn("Got packet type %d\n", packet->type);
 	}
 
-	stream->total_bytes_sent += packet->size;
+	stream->total_bytes_sent += bytes_sent;
 
 	obs_free_encoder_packet(packet);
 	return ret;
@@ -481,16 +477,9 @@ static inline bool send_headers(struct ftl_stream *stream)
 	size_t i = 0;
 	bool next = true;
 
-//	if (!send_audio_header(stream, i++, &next))
-//		return false;
 	if (!send_video_header(stream))
 		return false;
-/*
-	while (next) {
-		if (!send_audio_header(stream, i++, &next))
-			return false;
-	}
-*/
+
 	return true;
 }
 
@@ -880,7 +869,7 @@ static void *status_thread(void *data)
 			if ((status_code = ftl_ingest_connect(&stream->ftl_handle)) != FTL_SUCCESS) {
 				blog(LOG_WARNING, "Failed to connect to ingest %d\n", status_code);
 				obs_output_signal_stop(stream->output, OBS_OUTPUT_DISCONNECTED);
-				return;
+				return NULL;
 			}
 			blog(LOG_WARNING, "Done\n");
 
