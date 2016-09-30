@@ -1,9 +1,10 @@
 REM @Echo Off
 SET build_config=Release
-SET obs_version=0.15.4-ftl.4
+SET obs_version=0.15.4-ftl.7
 SET coredeps=C:\beam\tachyon_deps
 SET QTDIR64=C:\Qt\5.6\msvc2015_64
 SET QTDIR32=C:\Qt\5.6\msvc2015
+SET browser=C:\beam\obs-browser-1.23
 SET PATH=%PATH%;C:\Program Files (x86)\MSBuild\14.0\Bin;C:\Program Files (x86)\CMake\bin
 SET startingPath=%cd%
 SET DepsPath32=%coredeps%\win32
@@ -11,17 +12,19 @@ SET DepsPath64=%coredeps%\win64
 SET build32=
 SET build64=
 SET package=
-
+SET install_browser=
 if "%1" == "all" (
 SET build32=true
 SET build64=true
 SET package=true
+SET install_browser=true
 )
 if "%1" == "win64" (
 SET build64=true
 )
 if "%1" == "package" (
 SET package=true
+SET install_browser=true
 )
 if "%1" == "clean" (
    IF NOT EXIST ..\build GOTO NOBUILDDIR
@@ -33,9 +36,6 @@ pushd .
 cd ..
 pushd .
 call git submodule update --init
-cd plugins\libftl\ftl-sdk
-call git checkout xsplit
-REM call :SUB_FTLSDK
 popd .
 IF EXIST build GOTO BUILD_DIR_EXISTS
 mkdir build
@@ -66,6 +66,14 @@ if defined package (
     rmdir CMakeFiles /s /q
 	del CMakeCache.txt
 	cmake -G "Visual Studio 14 2015" -DOBS_VERSION_OVERRIDE=%obs_version% -DINSTALLER_RUN=true ..
+	if defined install_browser (
+		if defined build64 (
+			xcopy %browser%\obs-plugins\64bit\* %cd%\rundir\%build_config%\obs-plugins\64bit\ /s /e /y
+		)
+		if defined build32 (
+			xcopy %browser%\obs-plugins\32bit\* %cd%\rundir\%build_config%\obs-plugins\32bit\ /s /e /y
+		)
+	)
 	call msbuild /p:Configuration=%build_config% PACKAGE.vcxproj || goto DONE
 )
 GOTO DONE
