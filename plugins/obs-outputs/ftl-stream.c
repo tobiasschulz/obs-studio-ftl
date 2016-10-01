@@ -32,6 +32,7 @@
 #include <Iphlpapi.h>
 #else
 #include <sys/ioctl.h>
+#define INFINITE 0xFFFFFFFF
 #endif
 
 #define do_log(level, format, ...) \
@@ -864,7 +865,7 @@ static void *status_thread(void *data)
 	while (!disconnected(stream)) {
 		if ((status_code = ftl_ingest_get_status(&stream->ftl_handle, &status, INFINITE)) < 0) {
 			blog(LOG_INFO, "ftl_ingest_get_status returned %d\n", status_code);
-			Sleep(500);
+			uleep(500000);
 			continue;
 		}
 
@@ -880,7 +881,7 @@ static void *status_thread(void *data)
 			if ((status_code = ftl_ingest_connect(&stream->ftl_handle)) != FTL_SUCCESS) {
 				blog(LOG_WARNING, "Failed to connect to ingest %d\n", status_code);
 				obs_output_signal_stop(stream->output, OBS_OUTPUT_DISCONNECTED);
-				return;
+				return NULL;
 			}
 			blog(LOG_WARNING, "Done\n");
 
