@@ -411,6 +411,8 @@ public:
 	void UpdateTitleBar();
 	void UpdateSceneSelection(OBSSource source);
 
+	static std::string codecName;
+
 protected:
 	virtual void closeEvent(QCloseEvent *event) override;
 	virtual void changeEvent(QEvent *event) override;
