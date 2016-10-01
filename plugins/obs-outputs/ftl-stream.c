@@ -865,7 +865,7 @@ static void *status_thread(void *data)
 	while (!disconnected(stream)) {
 		if ((status_code = ftl_ingest_get_status(&stream->ftl_handle, &status, INFINITE)) < 0) {
 			blog(LOG_INFO, "ftl_ingest_get_status returned %d\n", status_code);
-			uleep(500000);
+			usleep(500000);
 			continue;
 		}
 
