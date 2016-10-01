@@ -1300,9 +1300,23 @@ bool AdvancedOutput::StartRecording()
 
 	UpdateAudioSettings();
 
-	if (!Active())
+	if (!Active()) {
 		SetupOutputs();
+	}
+	else {
 
+		obs_encoder_set_audio(aacTrack[0], obs_get_audio());
+		obs_encoder_set_audio(aacTrack[1], obs_get_audio());
+		obs_encoder_set_audio(aacTrack[2], obs_get_audio());
+		obs_encoder_set_audio(aacTrack[3], obs_get_audio());
+		int tracks = config_get_int(main->Config(), "AdvOut", "RecTracks");
+		for (int i = 0; i < MAX_AUDIO_MIXES; i++) {
+			if ((tracks & (1 << i)) != 0) {
+				obs_output_set_audio_encoder(fileOutput, aacTrack[i],
+					i);
+			}
+		}
+	}
 	if (!ffmpegOutput || ffmpegRecording) {
 		path = config_get_string(main->Config(), "AdvOut",
 				ffmpegRecording ? "FFFilePath" : "RecFilePath");
