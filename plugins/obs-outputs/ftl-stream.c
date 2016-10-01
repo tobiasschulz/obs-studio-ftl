@@ -48,6 +48,19 @@
 
 //#define TEST_FRAMEDROPS
 
+typedef struct _nalu_t {
+	int len;
+	int dts_usec;
+	int send_marker_bit;
+	uint8_t *data;
+}nalu_t;
+
+typedef struct _frame_of_nalus_t {
+	nalu_t nalus[100];
+	int total;
+	int complete_frame;
+}frame_of_nalus_t;
+
 struct ftl_stream {
 	obs_output_t     *output;
 
@@ -88,8 +101,8 @@ struct ftl_stream {
 	ftl_handle_t	    ftl_handle;
 	ftl_ingest_params_t params;
 	uint32_t         scale_width, scale_height, width, height;
+	frame_of_nalus_t coded_pic_buffer;
 };
-
 
 void log_libftl_messages(ftl_log_severity_t log_level, const char * message);
 static bool init_connect(struct ftl_stream *stream);
@@ -213,13 +226,16 @@ static void *ftl_stream_create(obs_data_t *settings, obs_output_t *output)
 	
 	stream->output = output;
 	pthread_mutex_init_value(&stream->packets_mutex);
-
+	
 	ftl_init();
 
 	if (pthread_mutex_init(&stream->packets_mutex, NULL) != 0)
 		goto fail;
 	if (os_event_init(&stream->stop_event, OS_EVENT_TYPE_MANUAL) != 0)
 		goto fail;
+
+	stream->coded_pic_buffer.total = 0;
+	stream->coded_pic_buffer.complete_frame = 0;
 
 	UNUSED_PARAMETER(settings);
 	return stream;
@@ -250,21 +266,6 @@ static void ftl_stream_stop(void *data, uint64_t ts)
 	}
 }
 
-/*
-static inline void set_rtmp_str(AVal *val, const char *str)
-{
-	bool valid  = (str && *str);
-	val->av_val = valid ? (char*)str       : NULL;
-	val->av_len = valid ? (int)strlen(str) : 0;
-}
-
-static inline void set_rtmp_dstr(AVal *val, struct dstr *str)
-{
-	bool valid  = !dstr_is_empty(str);
-	val->av_val = valid ? str->array    : NULL;
-	val->av_len = valid ? (int)str->len : 0;
-}
-*/
 static inline bool get_next_packet(struct ftl_stream *stream,
 		struct encoder_packet *packet)
 {
@@ -281,71 +282,100 @@ static inline bool get_next_packet(struct ftl_stream *stream,
 	return new_packet;
 }
 
+static int avc_get_video_frame(struct ftl_stream *stream, struct encoder_packet *packet, bool is_header, size_t idx) {
+
+	int consumed = 0;
+	int len = packet->size;
+	nalu_t *nalu;
+
+	unsigned char *video_stream = packet->data;
+
+	while (consumed < packet->size) {
+
+		if (stream->coded_pic_buffer.total >= sizeof(stream->coded_pic_buffer.nalus) / sizeof(stream->coded_pic_buffer.nalus[0])) {
+			warn("ERROR: cannot continue, nalu buffers are full\n");
+			return -1;
+		}
+
+		nalu = &stream->coded_pic_buffer.nalus[stream->coded_pic_buffer.total];
+
+		if (is_header) {
+			if (consumed == 0) {
+				video_stream += 6; //first 6 bytes are some obs header with part of the sps
+				consumed += 6;
+			}
+			else {
+				video_stream += 1; //another spacer byte of 0x1
+				consumed += 1;
+			}
+
+			len = video_stream[0] << 8 | video_stream[1];
+			video_stream += 2;
+			consumed += 2;
+		}
+		else {
+			len = video_stream[0] << 24 | video_stream[1] << 16 | video_stream[2] << 8 | video_stream[3];
+
+			if (len > (packet->size - consumed)) {
+				warn("ERROR: got len of %d but packet only has %d left\n", len, (packet->size - consumed));
+			}
+
+			consumed += 4;
+			video_stream += 4;
+		}
+
+		consumed += len;
+
+		uint8_t nalu_type = video_stream[0] & 0x1F;
+		uint8_t nri = (video_stream[0] >> 5) & 0x3;
+
+		int send_marker_bit = (consumed >= packet->size) && !is_header;
+
+		if ((nalu_type != 12 && nalu_type != 6 && nalu_type != 9) || nri) {
+			nalu->data = video_stream;
+			nalu->len = len;
+			nalu->send_marker_bit = 0;
+			stream->coded_pic_buffer.total++;
+		}
+
+		video_stream += len;
+	}
+
+	if (!is_header) {
+		stream->coded_pic_buffer.nalus[stream->coded_pic_buffer.total - 1].send_marker_bit = 1;
+	}
+
+	return 0;
+}
+
 static int send_packet(struct ftl_stream *stream,
 		struct encoder_packet *packet, bool is_header, size_t idx)
 {
-	uint8_t *data;
 	enum obs_encoder_type type;
-	size_t  size;
 	int     recv_size = 0;
 	int     ret = 0;
+	int bytes_sent = 0;
 
-#ifdef TEST_FRAMEDROPS
-	os_sleep_ms(rand() % 40);
-#endif
 	if (packet->type == OBS_ENCODER_VIDEO) {
-		int consumed = 0;
-		int len = packet->size;
 
-		unsigned char *video_stream = packet->data;
+		stream->coded_pic_buffer.total = 0;
+		avc_get_video_frame(stream, packet, is_header, idx);
 
-		while (consumed < packet->size) {
-			if (is_header) {
-				if (consumed == 0) {
-					video_stream += 6; //first 6 bytes are some obs header with part of the sps
-					consumed += 6;
-				}
-				else {
-					video_stream += 1; //another spacer byte of 0x1
-					consumed += 1;
-				}
-
-				len = video_stream[0] << 8 | video_stream[1];
-				video_stream += 2;
-				consumed += 2;
-			}
-			else {
-				len = video_stream[0] << 24 | video_stream[1] << 16 | video_stream[2] << 8 | video_stream[3];
-
-				if (len > (packet->size - consumed)) {
-					warn("ERROR: got len of %d but packet only has %d left\n", len, (packet->size - consumed));
-				}
-
-				consumed += 4;
-				video_stream += 4;
-			}
-
-			consumed += len;
-			//throw away access delimiter packets
-			//if (video_stream[0] != 9 && video_stream[0] != 12) 
-			{
-
-				int send_marker_bit = (consumed >= packet->size) && !is_header;
-
-				ftl_ingest_send_media(&stream->ftl_handle, FTL_VIDEO_DATA, video_stream, len, send_marker_bit);
-			}
-			video_stream += len;
+		int i;
+		for (i = 0; i < stream->coded_pic_buffer.total; i++) {
+			int send_marker_bit = (i + 1) == stream->coded_pic_buffer.total;
+			nalu_t *nalu = &stream->coded_pic_buffer.nalus[i];
+			bytes_sent += ftl_ingest_send_media(&stream->ftl_handle, FTL_VIDEO_DATA, nalu->data, nalu->len, nalu->send_marker_bit);
 		}
-
 	}
 	else if (packet->type == OBS_ENCODER_AUDIO) {
-		ftl_ingest_send_media(&stream->ftl_handle, FTL_AUDIO_DATA, packet->data, packet->size, 0);
+		bytes_sent += ftl_ingest_send_media(&stream->ftl_handle, FTL_AUDIO_DATA, packet->data, packet->size, 0);
 	}
 	else {
 		warn("Got packet type %d\n", packet->type);
 	}
 
-	stream->total_bytes_sent += packet->size;
+	stream->total_bytes_sent += bytes_sent;
 
 	obs_free_encoder_packet(packet);
 	return ret;
@@ -481,16 +511,9 @@ static inline bool send_headers(struct ftl_stream *stream)
 	size_t i = 0;
 	bool next = true;
 
-//	if (!send_audio_header(stream, i++, &next))
-//		return false;
 	if (!send_video_header(stream))
 		return false;
-/*
-	while (next) {
-		if (!send_audio_header(stream, i++, &next))
-			return false;
-	}
-*/
+
 	return true;
 }
 
@@ -880,7 +903,7 @@ static void *status_thread(void *data)
 			if ((status_code = ftl_ingest_connect(&stream->ftl_handle)) != FTL_SUCCESS) {
 				blog(LOG_WARNING, "Failed to connect to ingest %d\n", status_code);
 				obs_output_signal_stop(stream->output, OBS_OUTPUT_DISCONNECTED);
-				return;
+				return NULL;
 			}
 			blog(LOG_WARNING, "Done\n");
 
@@ -937,10 +960,6 @@ static bool init_connect(struct ftl_stream *stream)
 	char tmp_ip[20];
 	ftl_status_t status_code;
 
-/*
-	video_t *video = obs_encoder_video(obsx264->encoder);
-	const struct video_output_info *voi = video_output_get_info(video);
-*/
 
 	info("init_connect\n");
 
@@ -960,6 +979,9 @@ static bool init_connect(struct ftl_stream *stream)
 	stream->min_priority     = 0;
 
 	settings = obs_output_get_settings(stream->output);
+	obs_encoder_t *video_encoder = obs_output_get_video_encoder(stream->output);
+	obs_data_t *video_settings = obs_encoder_get_settings(video_encoder);
+
 	dstr_copy(&stream->path,     obs_service_get_url(service));
 	lookup_ingest_ip(stream->path.array, tmp_ip);
 	dstr_copy(&stream->path_ip, tmp_ip);
@@ -970,7 +992,7 @@ static bool init_connect(struct ftl_stream *stream)
 	if (obs_get_video_info(&ovi)) {
 		frame_rate = (float)ovi.fps_num / (float)ovi.fps_den;
 	}
-	
+
 	stream->params.log_func = log_test;
 	stream->params.stream_key = key;
 	stream->params.video_codec = FTL_VIDEO_H264;
@@ -978,6 +1000,8 @@ static bool init_connect(struct ftl_stream *stream)
 	stream->params.ingest_hostname = stream->path_ip.array;
 	stream->params.status_callback = NULL;
 	stream->params.video_frame_rate = frame_rate;
+	stream->params.video_kbps = (int)obs_data_get_int(video_settings, "bitrate");
+
 
 	if ((status_code = ftl_ingest_create(&stream->ftl_handle, &stream->params)) != FTL_SUCCESS) {
 		printf("Failed to create ingest handle %d\n", status_code);

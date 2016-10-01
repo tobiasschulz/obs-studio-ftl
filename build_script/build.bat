@@ -1,6 +1,6 @@
 REM @Echo Off
 SET build_config=Release
-SET obs_version=0.15.4-ftl.6
+SET obs_version=0.15.4-ftl.8
 SET coredeps=C:\beam\tachyon_deps
 SET QTDIR64=C:\Qt\5.6\msvc2015_64
 SET QTDIR32=C:\Qt\5.6\msvc2015
@@ -36,9 +36,6 @@ pushd .
 cd ..
 pushd .
 call git submodule update --init
-cd plugins\libftl\ftl-sdk
-call git checkout xsplit
-REM call :SUB_FTLSDK
 popd .
 IF EXIST build GOTO BUILD_DIR_EXISTS
 mkdir build
