@@ -887,7 +887,7 @@ static void *status_thread(void *data)
 
 		}
 		else {
-			blog(LOG_INFO, "Status:  Got Status message of type %d\n", status.type);
+			// blog(LOG_INFO, "Status:  Got Status message of type %d\n", status.type);
 		}
 	}
 
