@@ -16,7 +16,7 @@ if (WIN32)
 		ftl-sdk/libftl/win32/socket.c
 		ftl-sdk/libftl/win32/gettimeofday.c)
 else()
-  set(FTLSDK_PLATFORM_SOURCES ftl-sdk/libftl/posix/socket.c)
+  set(FTLSDK_PLATFORM_SOURCES ftl-sdk/libftl/posix/socket.c ftl-sdk/libftl/posix/gettimeofday.c)
 endif()	
 
 set(FTLSDK_HEADERS
