@@ -144,16 +144,19 @@ static const char *GetCodec(const char *id)
 	return NullToEmpty(obs_get_encoder_codec(id));
 }
 
-#ifdef AUDIO_USE_OPUS
-static const string opus_ = "OPUS";
-#else
-static const string aac_ = "AAC";
-#endif
 
-static void PopulateBitrateMap()
+static const string opus_ = "OPUS";
+
+static const string aac_ = "AAC";
+
+static string lastPopulatedCodecName;
+
+static void PopulateBitrateMap(string codecName)
 {
-	call_once(populateBitrateMap, []()
-	{
+	/*call_once(populateBitrateMap, [codecName]()
+	{*/
+	if (codecName != lastPopulatedCodecName) {
+		lastPopulatedCodecName = codecName;
 		HandleEncoderProperties(fallbackEncoder.c_str());
 
 		const char *id = nullptr;
@@ -167,11 +170,7 @@ static void PopulateBitrateMap()
 				end(encoders))
 				continue;
 
-#ifdef AUDIO_USE_OPUS
-			if (opus_ != GetCodec(id))
-#else
-			if (aac_ != GetCodec(id))
-#endif
+			if (codecName != GetCodec(id))
 				continue;
 
 			HandleEncoderProperties(id);
@@ -180,12 +179,7 @@ static void PopulateBitrateMap()
 		for (auto &encoder : encoders) {
 			if (encoder == fallbackEncoder)
 				continue;
-
-#ifdef AUDIO_USE_OPUS
-			if (opus_ != GetCodec(encoder.c_str()))
-#else
-			if (aac_ != GetCodec(encoder.c_str()))
-#endif
+			if (codecName != GetCodec(encoder.c_str()))
 				continue;
 
 			HandleEncoderProperties(encoder.c_str());
@@ -193,30 +187,33 @@ static void PopulateBitrateMap()
 
 		if (bitrateMap.empty()) {
 			blog(LOG_ERROR, "Could not enumerate any AAC encoder "
-					"bitrates");
+				"bitrates");
 			return;
 		}
 
 		ostringstream ss;
 		for (auto &entry : bitrateMap)
 			ss << "\n	" << setw(3) << entry.first
-			   << " kbit/s: '" << EncoderName(entry.second) << "' ("
-			   << entry.second << ')';
+			<< " kbit/s: '" << EncoderName(entry.second) << "' ("
+			<< entry.second << ')';
 
 		blog(LOG_DEBUG, "AAC encoder bitrate mapping:%s",
-				ss.str().c_str());
-	});
+			ss.str().c_str());
+	}
+	/*});*/
 }
 
-const map<int, const char*> &GetAACEncoderBitrateMap()
+const map<int, const char*> &GetAACEncoderBitrateMap(string codecName)
 {
-	PopulateBitrateMap();
+	PopulateBitrateMap(codecName);
 	return bitrateMap;
 }
 
-const char *GetAACEncoderForBitrate(int bitrate)
+
+
+const char *GetAACEncoderForBitrate(int bitrate, string codecName)
 {
-	auto &map_ = GetAACEncoderBitrateMap();
+	auto &map_ = GetAACEncoderBitrateMap( codecName);
 	auto res = map_.find(bitrate);
 	if (res == end(map_))
 		return NULL;
@@ -225,9 +222,9 @@ const char *GetAACEncoderForBitrate(int bitrate)
 
 #define INVALID_BITRATE 10000
 
-int FindClosestAvailableAACBitrate(int bitrate)
+int FindClosestAvailableAACBitrate(int bitrate, string codecName)
 {
-	auto &map_ = GetAACEncoderBitrateMap();
+	auto &map_ = GetAACEncoderBitrateMap( codecName);
 	int prev = 0;
 	int next = INVALID_BITRATE;
 
