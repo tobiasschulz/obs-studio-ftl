@@ -885,6 +885,8 @@ static void *status_thread(void *data)
 	ftl_status_msg_t status;
 	ftl_status_t status_code;
 
+	return NULL;
+
 	while (!disconnected(stream)) {
 		if ((status_code = ftl_ingest_get_status(&stream->ftl_handle, &status, INFINITE)) < 0) {
 			blog(LOG_INFO, "ftl_ingest_get_status returned %d\n", status_code);
