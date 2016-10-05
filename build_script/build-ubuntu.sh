@@ -9,7 +9,7 @@ test -d ~/src || mkdir ~/src
 cd ~/src
 
 rm -rf obs-studio-ftl && \
-git clone --recursive -b linux https://github.com/tobiasschulz/obs-studio-ftl.git && \
+git clone --recursive -b ftl https://github.com/tobiasschulz/obs-studio-ftl.git && \
 cd obs-studio-ftl && \
 mkdir build && cd build && \
 cmake -DUNIX_STRUCTURE=1 -DCMAKE_INSTALL_PREFIX=/usr .. && \
