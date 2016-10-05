@@ -32,6 +32,7 @@
 #include <Iphlpapi.h>
 #else
 #include <sys/ioctl.h>
+#define INFINITE 0xFFFFFFFF
 #endif
 
 #define do_log(level, format, ...) \
@@ -663,7 +664,7 @@ static int try_connect(struct ftl_stream *stream)
 		return OBS_OUTPUT_ERROR;
 	}
 
-	info("Connection to %s (%s) successful", stream->path.array, stream->path_ip.array);
+	info("Connection to %s (%s) successful (in thread %d)", stream->path.array, stream->path_ip.array, (unsigned int)(pthread_self()));
 
 	pthread_create(&stream->status_thread, NULL, status_thread, stream);
 
@@ -887,7 +888,12 @@ static void *status_thread(void *data)
 	while (!disconnected(stream)) {
 		if ((status_code = ftl_ingest_get_status(&stream->ftl_handle, &status, INFINITE)) < 0) {
 			blog(LOG_INFO, "ftl_ingest_get_status returned %d\n", status_code);
+#ifdef _WIN32
 			Sleep(500);
+#else
+			uint64_t ts = os_gettime_ns();
+			os_sleepto_ns(ts + 500 * 1000000);
+#endif
 			continue;
 		}
 
