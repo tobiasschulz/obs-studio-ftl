@@ -664,7 +664,7 @@ static int try_connect(struct ftl_stream *stream)
 		return OBS_OUTPUT_ERROR;
 	}
 
-	info("Connection to %s (%s) successful", stream->path.array, stream->path_ip.array);
+	info("Connection to %s (%s) successful (in thread %d)", stream->path.array, stream->path_ip.array, (unsigned int)(pthread_self()));
 
 	pthread_create(&stream->status_thread, NULL, status_thread, stream);
 
@@ -891,7 +891,8 @@ static void *status_thread(void *data)
 #ifdef _WIN32
 			Sleep(500);
 #else
-			usleep(500000);
+			uint64_t ts = os_gettime_ns();
+			os_sleepto_ns(ts + 500 * 1000000);
 #endif
 			continue;
 		}
