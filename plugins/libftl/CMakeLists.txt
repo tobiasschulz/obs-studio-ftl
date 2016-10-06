@@ -26,7 +26,7 @@ set(FTLSDK_HEADERS
 	
 if (WIN32)
   set(FTLSDK_PLATFORM_HEADERS 
-		ftl-sdk/libftl/win32/gettimeofday.h)
+		ftl-sdk/libftl/gettimeofday/gettimeofday.h)
 endif()		
 
 add_library(libftl SHARED 
@@ -35,7 +35,7 @@ add_library(libftl SHARED
 	${FTLSDK_PLATFORM_SOURCES}
 	${FTLSDK_PLATFORM_HEADERS})
 	
-set_target_properties(libftl PROPERTIES VERSION "0.2.3")
+set_target_properties(libftl PROPERTIES VERSION "0.5.0")
 set_target_properties(libftl PROPERTIES SOVERSION 0)	
 
 if(WIN32)
